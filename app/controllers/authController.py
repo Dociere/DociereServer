@@ -1,14 +1,13 @@
 import uuid
 import bcrypt
+import os
 import jwt
-import datetime
 from instance.db import db
-from flask import current_app
+from flask import current_app, jsonify, make_response
+from datetime import datetime, timezone, timedelta
 
-# Secret key for JWT (store in env in real apps)
-JWT_SECRET = "your_secret_key_here"
-JWT_ALGORITHM = "HS256"
-JWT_EXP_DELTA_SECONDS = 3600  # 1 hour
+JWT_SECRET = os.getenv("JWT_SECRET")
+ALGORITHM = os.getenv("ALGORITHM")
 
 def register_user(data):
     userName = data.get("userName")
@@ -18,11 +17,11 @@ def register_user(data):
     if not userName or not emailId or not password:
         return {"success": False, "error": "Username, EmailID and password required"}, 400
 
-    # Check if user exists
+    # Check if user exists (email as unique identifier assumed)
     if emailId in db:
         return {"success": False, "error": "User already exists"}, 400
 
-    # Hash password using bcrypt
+    # Hash password
     hashed_pw = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt())
 
     user_doc = {
@@ -30,32 +29,93 @@ def register_user(data):
         "userName": userName,
         "emailId": emailId,
         "password": hashed_pw.decode("utf-8"),
+        "created_at": datetime.now(timezone.utc).isoformat()
     }
 
     db.save(user_doc)
 
-    return {"success": True, "message": "User registered successfully"}, 201
+    # Create JWT
+    token = jwt.encode(
+        {
+            "userId": user_doc["userId"],
+            "exp": datetime.now(timezone.utc) + timedelta(hours=1)
+        },
+        JWT_SECRET,
+        ALGORITHM
+    )
+
+    # Create response + set cookie
+    response = make_response(jsonify({
+        "message": "User created successfully",
+        "user": {
+            "userId": user_doc["userId"],
+            "userName": userName,
+            "emailId": emailId
+        },
+        "token": token
+    }), 201)
+
+    response.set_cookie(
+        "uid",
+        token,
+        httponly=True,
+        secure=os.getenv("NODE_ENV") == "production",
+        samesite="Strict",
+        max_age=24 * 60 * 60  # 1 day
+    )
+
+    return response
+
 
 
 def login_user(data):
     userName = data.get("userName")
+    emailId = data.get("emailId")
     password = data.get("password")
 
+    if not userName or not password or not emailId:
+        return {"success": False, "error": "Username, EmailID and password required"}, 400
+
     try:
-        user = db[userName]
+        user = db[emailId]
     except KeyError:
         return {"success": False, "error": "Invalid username or password"}, 401
 
-    # Verify password
-    if not bcrypt.checkpw(password.encode("utf-8"), user["password"].encode("utf-8")):
+    if not bcrypt.checkpw(
+        password.encode("utf-8"),
+        user["password"].encode("utf-8")
+    ):
         return {"success": False, "error": "Invalid username or password"}, 401
 
-    # Generate JWT
-    payload = {
-        "userId": user["userId"],
-        "userName": userName,
-        "exp": datetime.datetime.utcnow() + datetime.timedelta(seconds=JWT_EXP_DELTA_SECONDS)
-    }
-    token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+    # Create JWT
+    token = jwt.encode(
+        {
+            "userId": user["userId"],
+            "exp": datetime.now(timezone.utc) + timedelta(hours=1)
+        },
+        JWT_SECRET,
+        ALGORITHM
+    )
 
-    return {"success": True, "token": token}, 200
+    # Create response + set cookie
+    response = make_response(jsonify({
+        "success": True,
+        "message": "Login successful",
+        "user": {
+            "userId": user["userId"],
+            "userName": user["userName"],
+            "emailId": user["emailId"]
+        },
+        "token": token
+    }), 200)
+
+    response.set_cookie(
+        "uid",
+        token,
+        httponly=True,
+        secure=os.getenv("NODE_ENV") == "production",
+        samesite="Strict",
+        max_age=24 * 60 * 60  # 1 day
+    )
+
+    return response
