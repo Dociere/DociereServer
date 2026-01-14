@@ -25,6 +25,7 @@ def register_user(data):
     hashed_pw = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt())
 
     user_doc = {
+        "_id": emailId,
         "userId": str(uuid.uuid4()),
         "userName": userName,
         "emailId": emailId,
@@ -38,6 +39,8 @@ def register_user(data):
     token = jwt.encode(
         {
             "userId": user_doc["userId"],
+            "userName": user_doc["userName"],
+            "emailId": user_doc["emailId"],
             "exp": datetime.now(timezone.utc) + timedelta(hours=1)
         },
         JWT_SECRET,
@@ -60,7 +63,7 @@ def register_user(data):
         token,
         httponly=True,
         secure=os.getenv("NODE_ENV") == "production",
-        samesite="Strict",
+        samesite="Lax",
         max_age=24 * 60 * 60  # 1 day
     )
 
@@ -73,8 +76,8 @@ def login_user(data):
     emailId = data.get("emailId")
     password = data.get("password")
 
-    if not userName or not password or not emailId:
-        return {"success": False, "error": "Username, EmailID and password required"}, 400
+    if not password or not emailId:
+        return {"success": False, "error": "EmailID and password required"}, 400
 
     try:
         user = db[emailId]
@@ -91,6 +94,8 @@ def login_user(data):
     token = jwt.encode(
         {
             "userId": user["userId"],
+            "userName": user["userName"],
+            "emailId": user["emailId"],
             "exp": datetime.now(timezone.utc) + timedelta(hours=1)
         },
         JWT_SECRET,
@@ -114,8 +119,37 @@ def login_user(data):
         token,
         httponly=True,
         secure=os.getenv("NODE_ENV") == "production",
-        samesite="Strict",
+        samesite="Lax",
         max_age=24 * 60 * 60  # 1 day
     )
 
     return response
+
+def logout_user():
+    response = make_response(jsonify({"success": True, "message": "Logged out successfully"}), 200)
+
+    response.set_cookie("uid", "", httponly=True, samesite="Lax", max_age=0)
+    return response
+
+
+def decode_jwt(token: str):
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[ALGORITHM])
+        return {"userId": payload["userId"], "userName": payload["userName"], "emailId": payload["emailId"]}
+    except jwt.ExpiredSignatureError:
+        raise Exception("Token expired")
+    except jwt.InvalidTokenError:
+        raise Exception("Invalid token")
+
+
+def check_auth_user(request):
+    token = request.cookies.get("uid")
+    if not token:
+        return {"authenticated": False, "message": "No token"}, 401
+
+    try:
+        user_payload = decode_jwt(token)
+        return {"authenticated": True, "user": user_payload}, 200
+    except Exception as e:
+        return {"authenticated": False, "message": str(e)}, 401
+
