@@ -1,5 +1,7 @@
 import os
 import couchdb
+from dotenv import load_dotenv
+load_dotenv()
 
 COUCHDB_USER = os.getenv("COUCHDB_USER", "admin")
 COUCHDB_PASSWORD = os.getenv("COUCHDB_PASSWORD", "password")
@@ -17,3 +19,8 @@ except Exception as e:
 if "dociere" not in server:
     server.create("dociere")
 db = server["dociere"]
+
+# This is for creating other DBs
+# userdb = server["users"]
+# messagedb = server["messages"]
+# projectdb = server["projects"]
