@@ -1,11 +1,10 @@
-from flask import Blueprint, request, jsonify, Flask
+from flask import Blueprint, request, jsonify
 import os, re, logging
 from google import genai
-from ..utils.latex_helpers import build_prompt, clean_latex
 
 logger = logging.getLogger(__name__)
 latex_bp = Blueprint("latex", __name__)
-app = Flask(__name__)
+# app = Flask(__name__)
 
 # Initialize API Key
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -17,7 +16,7 @@ if not GEMINI_API_KEY:
 # Initializing it here for reuse.
 client = genai.Client(api_key=GEMINI_API_KEY)
 
-@app.route('/api/generate-latex', methods=['POST'])
+@latex_bp.route('/generate-latex', methods=['POST'])
 def generate_latex():
     try:
         data = request.get_json()

@@ -10,7 +10,7 @@ collaboration_bp = Blueprint('collaboration', __name__)
 JWT_SECRET = os.getenv("JWT_SECRET")
 ALGORITHM = os.getenv("ALGORITHM")
 
-@collaboration_bp.route('/api/projects/<project_id>/share', methods=['POST'])
+@collaboration_bp.route('/projects/<project_id>/share', methods=['POST'])
 def create_share_token(project_id):
     """Owner creates a share token for collaborator"""
     auth_token = request.cookies.get("uid")
@@ -46,7 +46,7 @@ def create_share_token(project_id):
         "shareLink": share_link
     }), 200
 
-@collaboration_bp.route('/api/projects/join/<token>', methods=['POST'])
+@collaboration_bp.route('/projects/join/<token>', methods=['POST'])
 def join_project(token):
     """Collaborator joins project using token"""
     auth_token = request.cookies.get("uid")
