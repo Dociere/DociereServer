@@ -3,7 +3,7 @@ import jwt
 import os
 from datetime import datetime, timezone, timedelta
 from flask import Blueprint, request, jsonify
-from instance.db import db
+from instance.db import userDB
 
 collaboration_bp = Blueprint('collaboration', __name__)
 
@@ -36,7 +36,7 @@ def create_share_token(project_id):
     
     project = None
     try:
-        project = db.get(project_id)  # Try without prefix
+        project = userDB.get(project_id)  # Try without prefix
         if project:
             print(f"✓ Found project with key: {project_id}")
     except Exception as e:
@@ -44,7 +44,7 @@ def create_share_token(project_id):
     
     if not project:
         try:
-            project = db.get(f"project:{project_id}")  # Try with prefix
+            project = userDB.get(f"project:{project_id}")  # Try with prefix
             if project:
                 print(f"✓ Found project with key: project:{project_id}")
         except Exception as e:
@@ -111,7 +111,7 @@ def join_project(token):
     
     # Add user as collaborator
     project_key = f"project:{project_id}"
-    project = db.get(project_key)
+    project = userDB.get(project_key)
     
     if not project:
         return jsonify({"error": "Project not found"}), 404
@@ -125,7 +125,7 @@ def join_project(token):
             "joinedAt": datetime.now(timezone.utc).isoformat()
         })
         project["collaborators"] = collaborators
-        db.save(project)
+        userDB.save(project)
     
     return jsonify({
         "success": True,
