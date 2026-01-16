@@ -13,8 +13,8 @@ JWT_SECRET = os.getenv("JWT_SECRET")
 ALGORITHM = os.getenv("ALGORITHM")
 
 app = Flask(__name__)
-CORS(app, origins=["http://localhost:5173"], supports_credentials=True)
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='gevent')
+CORS(app, origins=["http://localhost:5173", "*"], supports_credentials=True)
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode="gevent")
 
 # Store active connections and document states
 active_rooms = {}  # roomId -> {users: set(), yjs_state: bytes}
