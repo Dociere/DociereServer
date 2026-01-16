@@ -2,12 +2,15 @@ import uuid
 import bcrypt
 import os
 import jwt
-from instance.db import db
+from instance.db import userDB
 from flask import current_app, jsonify, make_response
 from datetime import datetime, timezone, timedelta
+import time
 
 JWT_SECRET = os.getenv("JWT_SECRET")
 ALGORITHM = os.getenv("ALGORITHM")
+start_time = time.time()
+
 
 def register_user(data):
     userName = data.get("userName")
@@ -18,7 +21,7 @@ def register_user(data):
         return {"success": False, "error": "Username, EmailID and password required"}, 400
 
     # Check if user exists (email as unique identifier assumed)
-    if emailId in db:
+    if emailId in userDB:
         return {"success": False, "error": "User already exists"}, 400
 
     # Hash password
@@ -33,7 +36,7 @@ def register_user(data):
         "created_at": datetime.now(timezone.utc).isoformat()
     }
 
-    db.save(user_doc)
+    userDB.save(user_doc)
 
     # Create JWT
     token = jwt.encode(
@@ -80,7 +83,7 @@ def login_user(data):
         return {"success": False, "error": "EmailID and password required"}, 400
 
     try:
-        user = db[emailId]
+        user = userDB[emailId]
     except KeyError:
         return {"success": False, "error": "Invalid username or password"}, 401
 
@@ -153,3 +156,10 @@ def check_auth_user(request):
     except Exception as e:
         return {"authenticated": False, "message": str(e)}, 401
 
+
+# def check_server_health():
+#     return jsonify({
+#         "status": "healthy",
+#         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()),
+#         "uptime": time.time() - start_time
+#     })

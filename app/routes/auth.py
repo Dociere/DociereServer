@@ -19,3 +19,7 @@ def logout():
 def check_auth():
     response, status = check_auth_user(request)
     return jsonify(response), status
+
+# @auth_bp.route("/health", methods=["GET"])
+# def check_health():
+#     return check_server_health()

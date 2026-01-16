@@ -4,7 +4,7 @@ from flask_cors import CORS
 import jwt
 import os
 from datetime import datetime, timezone
-from instance.db import db
+from instance.db import userDB
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -13,8 +13,8 @@ JWT_SECRET = os.getenv("JWT_SECRET")
 ALGORITHM = os.getenv("ALGORITHM")
 
 app = Flask(__name__)
-CORS(app, origins=["http://localhost:5173"], supports_credentials=True)
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='gevent')
+CORS(app, origins=["http://localhost:5173", "*"], supports_credentials=True)
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode="gevent")
 
 # Store active connections and document states
 active_rooms = {}  # roomId -> {users: set(), yjs_state: bytes}
@@ -30,7 +30,7 @@ def verify_token(token):
 def verify_project_access(project_id, user_id):
     """Check if user has access to project (owner or collaborator)"""
     try:
-        project = db.get(f"project:{project_id}")
+        project = userDB.get(f"project:{project_id}")
         if not project:
             return False, None
         
@@ -141,10 +141,10 @@ def save_project_to_db(project_id, yjs_state):
     """Save Yjs state to CouchDB"""
     try:
         project_key = f"project:{project_id}"
-        project = db.get(project_key, {})
+        project = userDB.get(project_key, {})
         project['yjsState'] = yjs_state.hex() if yjs_state else None
         project['lastModified'] = datetime.now(timezone.utc).isoformat()
-        db.save(project)
+        userDB.save(project)
         print(f"Saved project {project_id} to database")
     except Exception as e:
         print(f"Error saving project: {e}")

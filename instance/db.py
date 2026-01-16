@@ -16,9 +16,13 @@ try:
 except Exception as e:
     print("Failed to connect to CouchDB:", e)
 
-if "dociere" not in server:
-    server.create("dociere")
-db = server["dociere"]
+if "users" not in server:
+    server.create("users")
+userDB = server["users"]
+
+if "projects" not in server:
+    server.create("projects")
+projectsDB = server["projects"]
 
 # This is for creating other DBs
 # userdb = server["users"]
