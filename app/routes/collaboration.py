@@ -3,7 +3,8 @@ import jwt
 import os
 from datetime import datetime, timezone, timedelta
 from flask import Blueprint, request, jsonify
-from instance.db import userDB
+from instance.db import projectsDB
+import socket
 
 collaboration_bp = Blueprint('collaboration', __name__)
 
@@ -36,7 +37,7 @@ def create_share_token(project_id):
     
     project = None
     try:
-        project = userDB.get(project_id)  # Try without prefix
+        project = projectsDB.get(project_id)  # Try without prefix
         if project:
             print(f"✓ Found project with key: {project_id}")
     except Exception as e:
@@ -44,7 +45,7 @@ def create_share_token(project_id):
     
     if not project:
         try:
-            project = userDB.get(f"project:{project_id}")  # Try with prefix
+            project = projectsDB.get(f"project:{project_id}")  # Try with prefix
             if project:
                 print(f"✓ Found project with key: project:{project_id}")
         except Exception as e:
@@ -57,31 +58,43 @@ def create_share_token(project_id):
     # Debug: Print project structure
     print(f"Project data: {project}")
     
-    project_owner = project.get("ownerId") or project.get("userId") or project.get("owner") or project.get("createdBy")
+    # project_owner = project.get("owner")
     
-    if not project_owner:
-        print("✗ No owner field found in project!")
-        return jsonify({"error": "Project has no owner"}), 500
+    # if not project_owner:
+    #     print("✗ No owner field found in project!")
+    #     return jsonify({"error": "Project has no owner"}), 500
     
-    print(f"Comparing: project_owner={project_owner} vs owner_id={owner_id}")
+    # print(f"Comparing: project_owner={project_owner} vs owner_id={owner_id}")
     
-    if project_owner != owner_id:
-        return jsonify({"error": "Not authorized"}), 403
+    # if project_owner != owner_id:
+    #     return jsonify({"error": "Not authorized"}), 403
     
-    print("✓ Authorization successful!")
+    # print("✓ Authorization successful!")
     
     data = request.json
     collaborator_email = data.get("collaboratorEmail")
     permissions = data.get("permissions", "edit")
+
+    # Get Laptop 1's actual IP (not localhost)
+    # laptop1_ip = socket.gethostbyname(socket.gethostname())
+    
+    # Or use environment variable for better control
+    # server_ip = os.getenv("SERVER_IP", laptop1_ip)
+    server_ip = os.getenv("SERVER_IP")
+    server_url = f"http://{server_ip}:5025"
+    ws_url = f"ws://{server_ip}:5001"
     
     collab_token = jwt.encode({
         "projectId": project_id,
         "collaboratorEmail": collaborator_email,
         "permissions": permissions,
+        "serverUrl": server_url,
+        "wsUrl": ws_url,
         "exp": datetime.now(timezone.utc) + timedelta(days=30)
     }, JWT_SECRET, ALGORITHM)
     
-    share_link = f"http://localhost:5173/join/{collab_token}"
+    # IMPORTANT: Share link points to Laptop 1's IP, not localhost
+    share_link = f"http://{server_ip}:5173/join/{collab_token}"
     
     return jsonify({
         "success": True,
@@ -111,7 +124,7 @@ def join_project(token):
     
     # Add user as collaborator
     project_key = f"project:{project_id}"
-    project = userDB.get(project_key)
+    project = projectsDB.get(project_key)
     
     if not project:
         return jsonify({"error": "Project not found"}), 404
@@ -125,7 +138,7 @@ def join_project(token):
             "joinedAt": datetime.now(timezone.utc).isoformat()
         })
         project["collaborators"] = collaborators
-        userDB.save(project)
+        projectsDB.save(project)
     
     return jsonify({
         "success": True,
