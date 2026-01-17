@@ -9,4 +9,4 @@ def register_blueprints(app):
     app.register_blueprint(health_bp, url_prefix="/api")
     app.register_blueprint(auth_bp, url_prefix="/api")
     app.register_blueprint(project_bp, url_prefix="/api")
-    app.register_blueprint(collaboration_bp)
+    app.register_blueprint(collaboration_bp, url_prefix="/api")
