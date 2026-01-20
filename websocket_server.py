@@ -55,16 +55,46 @@ def handle_connect():
 @socketio.on('join_project')
 def handle_join_project(data):
     """Join a project room for collaboration"""
-    token = data.get('token')
-    project_id = data.get('projectId')
+    print(f"=== WEBSOCKET JOIN REQUEST ===")
+    print(f"Data received: {data}")
     
-    user_id = verify_token(token)
-    if not user_id:
-        emit('error', {'message': 'Invalid token'})
+    # Token can come from either query params or data
+    token = data.get('token') or request.args.get('token')
+    project_id = data.get('projectId') or request.args.get('projectId')
+    
+    print(f"Token: {token[:20]}... (truncated)" if token else "No token")
+    print(f"Project ID: {project_id}")
+    
+    if not token:
+        print("❌ No token provided")
+        emit('error', {'message': 'No token provided'})
         return
     
-    has_access, role = verify_project_access(project_id, user_id)
-    if not has_access:
+    # Verify token (either auth token or guest token)
+    user_id = None
+    role = None
+    
+    # Try as auth token first
+    try:
+        user_id = verify_token(token)
+        if user_id:
+            has_access, role = verify_project_access(project_id, user_id)
+            print(f"✓ Auth token verified - User: {user_id}, Role: {role}")
+    except Exception as e:
+        print(f"Auth token verification failed: {e}")
+    
+    # Try as guest token
+    if not user_id:
+        from instance.session_manager import verify_guest_access
+        if verify_guest_access(token, project_id):
+            user_id = f"guest_{token[:8]}"
+            role = "guest"
+            print(f"✓ Guest token verified")
+        else:
+            print(f"❌ Guest token invalid or expired")
+    
+    if not user_id or not role:
+        print("❌ Access denied")
         emit('error', {'message': 'Access denied'})
         return
     
@@ -88,7 +118,7 @@ def handle_join_project(data):
         'userCount': len(active_rooms[room]['users'])
     }, room=room, skip_sid=request.sid)
     
-    print(f"User {user_id} joined project {project_id} as {role}")
+    print(f"✓ User {user_id} joined project {project_id} as {role}")
 
 @socketio.on('yjs_update')
 def handle_yjs_update(data):
@@ -150,4 +180,5 @@ def save_project_to_db(project_id, yjs_state):
         print(f"Error saving project: {e}")
 
 if __name__ == '__main__':
+    print("Running on http://0.0.0.0:5001")
     socketio.run(app, host='0.0.0.0', port=5001, debug=True)

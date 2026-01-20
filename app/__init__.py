@@ -21,7 +21,9 @@ def create_app():
             "http://localhost:5000",
             "*" #remove this in production environment (FIXME)
         ],
-        "supports_credentials": True
+        "supports_credentials": True,
+        "allow_headers": ["Content-Type"],
+        "expose_headers": ["Set-Cookie"]
     }})
 
     from .routes import register_blueprints

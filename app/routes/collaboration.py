@@ -7,6 +7,9 @@ from instance.db import projectsDB
 import socket
 import secrets
 from threading import Timer
+from instance.session_manager import verify_guest_access, verify_user_access
+# from instance.session_manager import guest_sessions
+from app.controllers.authController import decode_jwt
 
 collaboration_bp = Blueprint('collaboration', __name__)
 
@@ -47,6 +50,7 @@ def create_share_token(project_id):
     except Exception as e:
         print(f"Tried without prefix: {e}")
     
+    # This usually does not get trigerred thus can be removed
     if not project:
         try:
             project = projectsDB.get(f"project:{project_id}")  # Try with prefix
@@ -107,7 +111,7 @@ def create_share_token(project_id):
     }), 200
 
     
-@collaboration_bp.route('/api/projects/join/<token>', methods=['POST'])
+@collaboration_bp.route('/projects/join/<token>', methods=['POST'])
 def join_project(token):
     """Collaborator joins project using token"""
     print(f"=== JOIN REQUEST ===")
@@ -149,7 +153,7 @@ def join_project(token):
             user_payload = jwt.decode(auth_token, JWT_SECRET, algorithms=[ALGORITHM])
             user_id = user_payload["userId"]
             
-            # Add to project collaborators (persistent)
+            # Add to project collaborators
             collaborators = project.get("collaborators", [])
             if not any(c.get("userId") == user_id for c in collaborators):
                 collaborators.append({
@@ -164,13 +168,14 @@ def join_project(token):
             response_data["userType"] = "authenticated"
             response_data["userId"] = user_id
             
+            return jsonify(response_data), 200
+            
         except Exception as e:
             print(f"Auth token invalid, treating as guest: {e}")
             is_guest = True
     
-    # Handle guest user
+    # Handle guest user - ALWAYS create response with cookie
     if is_guest:
-        # Create temporary guest session
         guest_token = secrets.token_urlsafe(32)
         guest_sessions[guest_token] = {
             "projectId": project_id,
@@ -181,23 +186,11 @@ def join_project(token):
         print(f"✓ Created guest session: {guest_token}")
         
         response_data["userType"] = "guest"
-        response_data["guestToken"] = guest_token
+        response_data["guestToken"] = guest_token  # Return in body, not cookie
         
-        # Set guest session cookie (expires on browser close)
-        response = make_response(jsonify(response_data), 200)
-        response.set_cookie(
-            "guest_session",
-            guest_token,
-            httponly=True,
-            secure=False,
-            samesite="Lax",
-            max_age=None  # Session cookie - expires on tab close
-        )
-        return response
-    
-    return jsonify(response_data), 200
+        return jsonify(response_data), 200
 
-@collaboration_bp.route('/api/projects/<project_id>/leave-session', methods=['POST'])
+@collaboration_bp.route('/projects/<project_id>/leave-session', methods=['POST'])
 def leave_session(project_id):
     """Guest user explicitly leaves session"""
     guest_token = request.cookies.get("guest_session")
@@ -212,7 +205,7 @@ def leave_session(project_id):
     return response
 
 
-@collaboration_bp.route('/api/projects/<project_id>/verify-access', methods=['GET'])
+@collaboration_bp.route('/projects/<project_id>/verify-access', methods=['GET'])
 def verify_access(project_id):
     """Verify user has access to project (authenticated or guest session)"""
     auth_token = request.cookies.get("uid")
@@ -252,6 +245,57 @@ def verify_access(project_id):
     
     return jsonify({"access": False}), 403
 
+@collaboration_bp.route('/projects/<project_id>', methods=['GET'])
+def get_project(project_id):
+    print(f"=== GET PROJECT REQUEST ===")
+    print(f"Project ID: {project_id}")
+    
+    # auth_token = request.cookies.get("uid")
+    # guest_token = request.headers.get("X-Guest-Token")  # From header instead
+    
+    # print(f"Auth token: {auth_token is not None}")
+    # print(f"Guest token from header: {guest_token}")
+    
+    # has_access = False
+    
+    # Get project
+    project = projectsDB.get(project_id)
+    if not project:
+        return jsonify({"error": "Project not found"}), 404
+    
+    print(project)
+    
+    # Check authenticated user
+    # if auth_token:
+    #     try:
+    #         user_payload = decode_jwt(auth_token)
+    #         user_id = user_payload["userId"]
+    #         has_access = verify_user_access(user_id, project, projectsDB)
+    #     except:
+    #         pass
+    
+    # # Check guest session from header
+    # if not has_access and guest_token:
+    #     print(f"Checking guest token: {guest_token}")
+    #     has_access = verify_guest_access(guest_token, project_id)
+    #     print(f"Guest access: {has_access}")
+    
+    # if not has_access:
+    #     print("❌ Access denied")
+    #     return jsonify({"error": "Access denied"}), 403
+    
+    # print("✅ Access granted")
+    
+    return jsonify({
+        "id": project.get("_id"),
+        "title": project.get("title"),
+        "files": project.get("files", {}),
+        "activeFile": project.get("activeFile"),
+        "owner": project.get("owner"),
+        "created": project.get("created"),
+        "modified": project.get("modified")
+    }), 200
+
 
 def cleanup_inactive_sessions():
     """Remove guest sessions older than 24 hours"""
@@ -271,3 +315,56 @@ def cleanup_inactive_sessions():
 
 # Start cleanup when server starts
 cleanup_inactive_sessions()
+
+
+@collaboration_bp.route('/projects/<project_id>/get-collab-token', methods=['POST'])
+def get_collaboration_token(project_id):
+    """Owner gets a temporary token for WebSocket collaboration"""
+    auth_token = request.cookies.get("uid")
+
+    print("auth_token", auth_token)
+    
+    if not auth_token:
+        return jsonify({"error": "Not authenticated"}), 401
+    
+    try:
+        user_payload = decode_jwt(auth_token)
+        user_id = user_payload["userId"]
+    except:
+        return jsonify({"error": "Invalid token"}), 401
+    
+    # Verify ownership or collaborator status
+    project = projectsDB.get(project_id)
+    if not project:
+        return jsonify({"error": "Project not found"}), 404
+    
+    # is_owner = project.get("owner") == user_id
+    # is_collaborator = any(c.get("userId") == user_id for c in project.get("collaborators", []))
+
+    # print("is_owner, is_collaborator", is_owner, is_collaborator)
+    
+    # if not is_owner and not is_collaborator:
+    #     return jsonify({"error": "Access denied"}), 403
+    
+    # Create temporary collaboration token (1 hour expiry)
+    collab_token = secrets.token_urlsafe(32)
+    
+    # Store in session manager
+    # guest_sessions[collab_token] = {
+    #     "projectId": project_id,
+    #     "userId": user_id,
+    #     "permissions": "owner" if is_owner else "edit",
+    #     "createdAt": datetime.now(timezone.utc).isoformat()
+    # }
+
+    guest_sessions[collab_token] = {
+        "projectId": project_id,
+        "userId": user_id,
+        "permissions": "edit",
+        "createdAt": datetime.now(timezone.utc).isoformat()
+    }
+    
+    return jsonify({
+        "collaborationToken": collab_token,
+        "expiresIn": 3600  # 1 hour
+    }), 200
