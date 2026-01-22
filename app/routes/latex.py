@@ -119,6 +119,7 @@ import json
 from dotenv import load_dotenv
 from google import genai
 import render_strategies as rs
+import difflib
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -316,4 +317,81 @@ Structure:
 
     except Exception as e:
         logger.error(f"Generation Error: {str(e)}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# latex.py
+
+@latex_bp.route('/edit-latex', methods=['POST'])
+def edit_latex():
+    try:
+        data = request.get_json()
+        user_prompt = data.get('prompt')
+        current_latex = data.get('latexContent')
+
+        if not user_prompt or not current_latex:
+            return jsonify({"success": False, "error": "Missing inputs"}), 400
+
+        # System Prompt (Requesting JSON)
+        system_prompt = """You are an expert LaTeX Editor.
+        Task: Modify the LaTeX document based on the user's request.
+
+        CRITICAL OUTPUT FORMAT:
+        Return a VALID JSON object with:
+        1. "full_latex": The full, compilable document.
+        2. "changed_snippet": A short excerpt of just the modified part.
+
+        RULES:
+        - Output raw JSON only. No markdown.
+        - Escape backslashes (e.g. \\documentclass).
+        """
+
+        full_prompt = f"""{system_prompt}\n\nUSER: "{user_prompt}"\n\nDOCUMENT:\n{current_latex}"""
+
+        response = client.models.generate_content(
+            model='gemini-2.5-flash', 
+            contents=full_prompt
+        )
+
+        # Parse JSON
+        cleaned_text = clean_json_response(response.text)
+        try:
+            result_json = json.loads(cleaned_text)
+            full_doc = result_json.get('full_latex', '')
+            snippet = result_json.get('changed_snippet', '')
+        except json.JSONDecodeError:
+            logger.error("JSON Decode failed, falling back to raw text")
+            # Fallback: Assume the whole text is the latex if JSON fails
+            full_doc = cleaned_text
+            snippet = ""
+
+        # --- FALLBACK: Auto-calculate Diff if Snippet is empty ---
+        if not snippet or len(snippet) < 10:
+            # Compare lines to find the difference
+            diff = difflib.unified_diff(
+                current_latex.splitlines(), 
+                full_doc.splitlines(), 
+                n=0, # No context lines
+                lineterm=''
+            )
+            # Extract just the added lines (starting with +)
+            changes = [line[1:] for line in diff if line.startswith('+') and not line.startswith('+++')]
+            if changes:
+                snippet = "\n".join(changes[:10]) # First 10 changed lines
+                if len(changes) > 10: snippet += "\n..."
+            else:
+                snippet = "Modifications applied throughout the document."
+
+        if "\\begin{document}" not in full_doc:
+             return jsonify({"success": False, "error": "AI malformed the structure."}), 500
+
+        return jsonify({
+            "success": True,
+            "latexContent": full_doc,
+            "changedSnippet": snippet,
+            "message": "Success"
+        })
+
+    except Exception as e:
+        logger.error(f"Edit Error: {str(e)}")
         return jsonify({"success": False, "error": str(e)}), 500
