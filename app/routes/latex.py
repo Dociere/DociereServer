@@ -1,116 +1,3 @@
-# from flask import Blueprint, request, jsonify
-# import os, re, logging
-# from google import genai
-
-# logger = logging.getLogger(__name__)
-# latex_bp = Blueprint("latex", __name__)
-# # app = Flask(__name__)
-
-# # Initialize API Key
-# GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-# if not GEMINI_API_KEY:
-#     logger.error("GEMINI_API_KEY is missing in environment variables.")
-
-# # Note: In the new SDK, we typically instantiate the client where needed 
-# # or create a global client instance if thread-safety permits. 
-# # Initializing it here for reuse.
-# client = genai.Client(api_key=GEMINI_API_KEY)
-
-# @latex_bp.route('/generate-latex', methods=['POST'])
-# def generate_latex():
-#     try:
-#         data = request.get_json()
-        
-#         if not data:
-#             return jsonify({"success": False, "error": "No JSON body provided"}), 400
-
-#         user_idea = data.get('userIdea')
-#         title = data.get('title')
-#         template_type = data.get('templateType', 'article')
-#         author_details = data.get('authorDetails', {})
-
-#         # Validation
-#         if not user_idea or not title:
-#             return jsonify({
-#                 "success": False, 
-#                 "error": "Missing required fields: userIdea and title are required"
-#             }), 400
-
-#         # Construct Author String safely
-#         author_name = author_details.get('name', 'Author')
-#         author_email = f"- Email: {author_details['email']}" if author_details.get('email') else ""
-#         author_affiliation = f"- Affiliation: {author_details['affiliation']}" if author_details.get('affiliation') else ""
-
-#         # Construct Prompt
-#         prompt = f"""You are a LaTeX document generator. Your task is to create a complete, valid LaTeX document.
-
-# CRITICAL INSTRUCTIONS:
-# 1. Output ONLY raw LaTeX code - no explanations, no markdown formatting, no code blocks
-# 2. Do NOT wrap your response in ```latex or ``` or any other markdown syntax
-# 3. Start directly with \\documentclass and end with \\end{{document}}
-# 4. The output must be immediately compilable LaTeX code
-# 5. Do NOT include any text before \\documentclass or after \\end{{document}}
-# 6. Do NOT add any commentary, explanations, or notes outside the LaTeX code
-# 7. If the user idea is vague, make reasonable assumptions to create a coherent document
-# 8. Ensure proper LaTeX syntax and structure throughout the document
-
-# [VERY IMPORTANT]if Template Type is Blank Document, ONLY,:-
-# 1. Use this exact syntax to add sections: \\section{{Section Title}}
-# 2. Use this exact syntax to add subsections: \\subsection{{Subsection Title}}
-
-# Here are the details for the document you need to generate:
-
-# Document Requirements:
-# - Title: {title}
-# - Template Type: {template_type}
-# - Author: {author_name}
-# {author_email}
-# {author_affiliation}
-
-# Content Brief:
-# {user_idea}
-
-# Generate a professional {template_type} document with:
-# - Appropriate document class (article, report, book, etc.)
-# - Essential packages (geometry, inputenc, graphicx, hyperref, amsmath, etc.)
-# - Proper structure (title, author, abstract if applicable, sections, subsections as needed)
-# - Well-formatted content based on the user's idea
-# - Professional typography and layout
-# - Bibliography section if references are mentioned
-
-# IMPORTANT: Your ENTIRE response must be valid LaTeX code. Start with \\documentclass and end with \\end{{document}}. Nothing else."""
-
-#         # Generate Content using the new SDK
-#         response = client.models.generate_content(
-#             model='gemini-2.5-flash',
-#             contents=prompt
-#         )
-
-#         latex_content = response.text.strip()
-
-#         # Robust trimming logic
-#         # Removes ```latex, ```tex, or ``` at the start, and ``` at the end
-#         latex_content = re.sub(r'^```(latex|tex)?\s*', '', latex_content, flags=re.IGNORECASE)
-#         latex_content = re.sub(r'\s*```$', '', latex_content)
-        
-#         # Remove any remaining backticks at start/end
-#         latex_content = latex_content.strip('`').strip()
-
-#         # Validate that we have LaTeX content
-#         if "\\documentclass" not in latex_content or "\\end{document}" not in latex_content:
-#             raise ValueError("Generated content does not appear to be valid LaTeX.")
-
-#         return jsonify({
-#             "success": True,
-#             "latexContent": latex_content
-#         })
-
-#     except Exception as e:
-#         logger.error(f"AI generation error: {str(e)}")
-#         return jsonify({
-#             "success": False,
-#             "error": str(e) or "Failed to generate LaTeX content"
-#         }), 500
 from flask import Blueprint, request, jsonify
 import os
 import re
@@ -188,6 +75,31 @@ RENDERER_MAP = {
     "mla": "generate_mla_latex"
 }
 
+def repair_json(json_str):
+    # 1. Strip Markdown code blocks
+    json_str = re.sub(r'^```(json)?\s*', '', json_str, flags=re.IGNORECASE)
+    json_str = re.sub(r'\s*```$', '', json_str)
+    
+    # 2. FIX: Escape backslashes that are NOT valid JSON escapes.
+    # JSON allows: \", \\, \/, \b, \f, \n, \r, \t, \uXXXX
+    # LaTeX uses: \c, \s, \t, \b, \l, \S, etc. 
+    # Logic: Find a backslash that is NOT followed by specific valid chars
+    
+    # Pattern: (?<!\\)\\(?![nrtbfu"\\/])
+    # Meaning: A backslash, NOT preceded by another backslash, and NOT followed by valid escape chars.
+    
+    json_str = re.sub(r'(?<!\\)\\(?![nrtbfu"\\/])', r'\\\\', json_str)
+
+    # 3. Specific fix for common LaTeX double-backslashes which might be triply escaped or weird
+    # If the AI wrote literal newline as \n, we keep it. 
+    # But if it wrote LaTeX newline \\ (double backslash), in JSON string it should be \\\\
+    # This is hard to distinguish from regex alone, but the step 2 regex usually handles \section -> \\section safe.
+
+    # 4. Remove trailing commas (common AI error)
+    json_str = re.sub(r',\s*([\]}])', r'\1', json_str)
+    
+    return json_str.strip()
+
 # --- UTILS ---
 def validate_latex_security(latex_content):
     """Scans LaTeX content for dangerous commands."""
@@ -229,6 +141,9 @@ def generate_latex():
             author_name = author_details.get('name', 'Author')
             prompt = f"""You are a LaTeX document generator. 
 CRITICAL: Output ONLY raw LaTeX. Start with \\documentclass.
+CRITICAL SYNTAX RULES:
+1. NO MARKDOWN: Never use **bold** or *italic*. Use \\textbf{{bold}} and \\textit{{italic}}.
+2. ESCAPE CHARACTERS: Escape & % $ # _ {{ }} ~ ^ \\ (e.g. use \\&).
 Title: {title}
 Author: {author_name}
 Content: {user_idea}
@@ -245,11 +160,19 @@ Content: {user_idea}
         else:
             required_sections = TEMPLATE_REGISTRY.get(template_type, ["Introduction", "Methodology", "Results", "Conclusion"])
             
-            prompt = f"""You are an academic content generator.
+            # --- MODIFIED SYSTEM PROMPT START ---
+            prompt = f"""You are an expert LaTeX content generator.
 Task: Generate content for a "{template_type}" paper titled "{title}".
 Idea: "{user_idea}"
 
-CRITICAL: Output ONLY valid JSON. No markdown.
+CRITICAL INSTRUCTIONS FOR LATEX SYNTAX:
+1. **NO MARKDOWN**: Never use `**bold**` or `*italic*`. Use `\\textbf{{bold}}` and `\\textit{{italic}}`.
+2. **ESCAPE CHARACTERS**: Escape the following in text: & % $ # _ {{ }} ~ ^ \\ (e.g., use `\\&` not `&`).
+3. **MATH**: Use `$` for inline math. Do not escape chars inside math mode.
+4. **CONTENT ONLY**: The JSON values should only contain the body text for that section.
+
+CRITICAL OUTPUT FORMAT:
+Output ONLY valid JSON. No markdown code blocks.
 Structure:
 {{
     "abstract": "Abstract text here...",
@@ -261,12 +184,27 @@ Structure:
 }}
 """
             response = client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
-            raw_json = clean_json_response(response.text)
+            raw_text = response.text
+            
+            # Attempt 1: Clean and Parse
+            cleaned_json = clean_json_response(raw_text)
             
             try:
-                content_data = json.loads(raw_json)
-            except json.JSONDecodeError:
-                return jsonify({"success": False, "error": "AI generated invalid JSON"}), 500
+                content_data = json.loads(cleaned_json)
+            except json.JSONDecodeError as e1:
+                logger.warning(f"Initial JSON parse failed: {e1}. Attempting repair...")
+                
+                # Attempt 2: Repair and Parse
+                repaired_json = repair_json(cleaned_json)
+                try:
+                    content_data = json.loads(repaired_json)
+                except json.JSONDecodeError as e2:
+                    logger.error(f"CRITICAL JSON ERROR after repair. \nOriginal Error: {e1}\nRepair Error: {e2}")
+                    return jsonify({
+                        "success": False, 
+                        "error": "AI generated invalid JSON structure that could not be repaired.",
+                        "details": str(e2)
+                    }), 500
 
             # Prepare data for renderer
             authors_list = [{
@@ -296,10 +234,10 @@ Structure:
                     final_latex = renderer_func(title, authors_list, content_data.get('abstract',''), content_data.get('sections',{}), conf_info)
                 elif template_type in ['ajp', 'aip']:
                     final_latex = renderer_func(title, authors_list, content_data.get('abstract',''), content_data.get('sections',{}))
-                elif template_type in ['acm_manuscript', 'acs', 'frontiers', 'asme', 'ios_book_article', 'spie_journal', 'science', 'asm_journal']:
+                elif template_type in ['springer_nature','acm_manuscript', 'acs', 'frontiers', 'asme', 'ios_book_article', 'spie_journal', 'science', 'asm_journal']:
                     final_latex = renderer_func(title, authors_list, content_data.get('abstract',''), content_data.get('keywords',''), content_data.get('sections',{}))
                 else:
-                    # Default signature (Springer, IEEE, MDPI, etc.)
+                    # Default signature (IEEE, MDPI, etc.)
                     final_latex = renderer_func(title, authors_list, content_data.get('abstract',''), content_data.get('keywords',''), content_data.get('sections',{}), journal_meta)
 
                 is_safe, msg = validate_latex_security(final_latex)
@@ -336,14 +274,22 @@ def edit_latex():
         system_prompt = """You are an expert LaTeX Editor.
         Task: Modify the LaTeX document based on the user's request.
 
+        CRITICAL SYNTAX RULES:
+        1. **NO MARKDOWN**: 
+           - ❌ NEVER output `**text**` or `*text*`. 
+           - ✅ ALWAYS output `\\textbf{text}` or `\\textit{text}`.
+           - ❌ NEVER output `### Heading`.
+           - ✅ ALWAYS output `\\section{Heading}`.
+        2. **ESCAPE TEXT CHARACTERS**: 
+           - Escape & % $ # _ { } ~ ^ \\ in normal text (e.g. "Profit \\& Loss").
+        3. **PRESERVE STRUCTURE**: Do not remove \\begin{document} unless asked.
+
         CRITICAL OUTPUT FORMAT:
         Return a VALID JSON object with:
         1. "full_latex": The full, compilable document.
         2. "changed_snippet": A short excerpt of just the modified part.
-
-        RULES:
-        - Output raw JSON only. No markdown.
-        - Escape backslashes (e.g. \\documentclass).
+        
+        Output raw JSON only. Escape backslashes in the JSON string (e.g. \\\\documentclass).
         """
 
         full_prompt = f"""{system_prompt}\n\nUSER: "{user_prompt}"\n\nDOCUMENT:\n{current_latex}"""
