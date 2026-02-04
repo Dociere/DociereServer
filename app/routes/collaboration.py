@@ -18,6 +18,19 @@ ALGORITHM = os.getenv("ALGORITHM")
 
 guest_sessions = {} 
 
+def get_local_ip():
+    """Detects the actual LAN IP address of this machine"""
+    try:
+        # Create a dummy socket to connect to Google DNS (doesn't actually send data)
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(0)
+        s.connect(('8.8.8.8', 1)) 
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return '127.0.0.1'
+
 @collaboration_bp.route('/projects/<project_id>/share', methods=['POST'])
 def create_share_token(project_id):
     """Owner creates a share token for collaborator"""
@@ -88,7 +101,11 @@ def create_share_token(project_id):
     
     # Or use environment variable for better control
     # server_ip = os.getenv("SERVER_IP", laptop1_ip)
+    # Dynamically detect server IP
     server_ip = os.getenv("SERVER_IP")
+    if not server_ip or server_ip == "localhost":
+        server_ip = get_local_ip()
+        print(f"✓ Detected Share Server IP: {server_ip}")
     server_url = f"http://{server_ip}:5025"
     ws_url = f"ws://{server_ip}:5001"
     
@@ -117,6 +134,7 @@ def join_project(token):
     print(f"=== JOIN REQUEST ===")
     
     auth_token = request.cookies.get("uid")
+    print("auth_token", auth_token)
     is_guest = not auth_token
     
     try:
@@ -176,17 +194,40 @@ def join_project(token):
     
     # Handle guest user - ALWAYS create response with cookie
     if is_guest:
-        guest_token = secrets.token_urlsafe(32)
+        # Create a unique guest ID
+        guest_id = f"guest_{uuid.uuid4().hex[:8]}"
+        
+        # Dynamically detect server IP
+        server_ip = os.getenv("SERVER_IP")
+        if not server_ip or server_ip == "localhost":
+            server_ip = get_local_ip()
+        
+        server_url = f"http://{server_ip}:5025"
+        ws_url = f"ws://{server_ip}:5001"
+
+        # Generate JWT for guest (Standardized format)
+        guest_token = jwt.encode({
+            "projectId": project_id,
+            "userId": guest_id,
+            "permissions": permissions,
+            "serverUrl": server_url,
+            "wsUrl": ws_url,
+            "exp": datetime.now(timezone.utc) + timedelta(hours=24)
+        }, JWT_SECRET, ALGORITHM)
+        
+        # We can still track session metadata if needed, but the JWT is the authority
+        # FIXME: Delete the below code if theres no dependency
         guest_sessions[guest_token] = {
             "projectId": project_id,
             "permissions": permissions,
+            "userId": guest_id,
             "createdAt": datetime.now(timezone.utc).isoformat()
         }
         
-        print(f"✓ Created guest session: {guest_token}")
+        print(f"✓ Created guest JWT session: {guest_id}")
         
         response_data["userType"] = "guest"
-        response_data["guestToken"] = guest_token  # Return in body, not cookie
+        response_data["guestToken"] = guest_token  # Return in body
         
         return jsonify(response_data), 200
 
@@ -319,52 +360,65 @@ cleanup_inactive_sessions()
 
 @collaboration_bp.route('/projects/<project_id>/get-collab-token', methods=['POST'])
 def get_collaboration_token(project_id):
-    """Owner gets a temporary token for WebSocket collaboration"""
-    auth_token = request.cookies.get("uid")
-
-    print("auth_token", auth_token)
+    """
+    Generates a JWT token for Owners AND Collaborators.
+    """
     
+    # 1. AUTHENTICATION
+    auth_token = request.cookies.get("uid")
     if not auth_token:
         return jsonify({"error": "Not authenticated"}), 401
     
     try:
-        user_payload = decode_jwt(auth_token)
-        user_id = user_payload["userId"]
-    except:
-        return jsonify({"error": "Invalid token"}), 401
+        user_payload = jwt.decode(auth_token, JWT_SECRET, algorithms=[ALGORITHM])
+        requester_email = user_payload.get("emailId")
+    except Exception as e:
+        return jsonify({"error": "Invalid auth token"}), 401
     
-    # Verify ownership or collaborator status
-    project = projectsDB.get(project_id)
+    # 2. FETCH PROJECT
+    project = projectsDB.get(project_id) or projectsDB.get(f"project:{project_id}")
     if not project:
         return jsonify({"error": "Project not found"}), 404
     
-    # is_owner = project.get("owner") == user_id
-    # is_collaborator = any(c.get("userId") == user_id for c in project.get("collaborators", []))
+    
+    # 3. VERIFY PERMISSIONS
+    owner_email = project.get("owner")
+    
+    # Check if user is in the collaborators list
+    collaborators = project.get("collaborators", [])
 
-    # print("is_owner, is_collaborator", is_owner, is_collaborator)
+    is_collaborator = any(c.get("userId") == requester_email for c in collaborators)
     
-    # if not is_owner and not is_collaborator:
-    #     return jsonify({"error": "Access denied"}), 403
-    
-    # Create temporary collaboration token (1 hour expiry)
-    collab_token = secrets.token_urlsafe(32)
-    
-    # Store in session manager
-    # guest_sessions[collab_token] = {
-    #     "projectId": project_id,
-    #     "userId": user_id,
-    #     "permissions": "owner" if is_owner else "edit",
-    #     "createdAt": datetime.now(timezone.utc).isoformat()
-    # }
+    is_owner = (owner_email == requester_email)
 
-    guest_sessions[collab_token] = {
+    if not is_owner and not is_collaborator:
+        print(f"⛔ Access Denied: {requester_email} is neither owner nor collaborator.")
+        return jsonify({"error": "Access denied"}), 403
+
+    # 4. SERVER DISCOVERY
+    server_ip = os.getenv("SERVER_IP")
+    if not server_ip or server_ip == "localhost":
+         server_ip = get_local_ip()
+         print(f"✓ Detected Owner Server IP: {server_ip}") 
+
+    server_url = f"http://{server_ip}:5025"
+    ws_url = f"ws://{server_ip}:5001"
+
+    # 5. GENERATE JWT
+    token_payload = {
         "projectId": project_id,
-        "userId": user_id,
-        "permissions": "edit",
-        "createdAt": datetime.now(timezone.utc).isoformat()
+        "userId": requester_email,
+        "permissions": "owner" if is_owner else "edit", # <--- DYNAMIC PERMISSIONS
+        "serverUrl": server_url,
+        "wsUrl": ws_url,
+        "exp": datetime.now(timezone.utc) + timedelta(hours=24)
     }
+
+    collab_token = jwt.encode(token_payload, JWT_SECRET, ALGORITHM)
     
     return jsonify({
+        "success": True,
         "collaborationToken": collab_token,
-        "expiresIn": 3600  # 1 hour
+        "serverUrl": server_url,
+        "wsUrl": ws_url
     }), 200
