@@ -24,6 +24,14 @@ if "projects" not in server:
     server.create("projects")
 projectsDB = server["projects"]
 
+if "ai_chat" not in server:
+    server.create("ai_chat")
+aiChatDB = server["ai_chat"]
+
+if "drafts" not in server:
+    server.create("drafts")
+draftsDB = server["drafts"]
+
 # This is for creating other DBs
 # userdb = server["users"]
 # messagedb = server["messages"]

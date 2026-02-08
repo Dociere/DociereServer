@@ -14,6 +14,7 @@ def saveProject(project_id, data):
     if project_id in projectsDB:
         doc = projectsDB[project_id]
         doc["files"] = files
+        doc["title"] = title
         doc["owner"] = owner
         doc["activeFile"] = activeFile
         doc["modified"] = now
