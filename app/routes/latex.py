@@ -283,7 +283,8 @@ def edit_latex():
         2. **ESCAPE TEXT CHARACTERS**: 
            - Escape & % $ # _ { } ~ ^ \\ in normal text (e.g. "Profit \\& Loss").
         3. **PRESERVE STRUCTURE**: Do not remove \\begin{document} unless asked.
-
+        4. **PRESERVE STYLING**: Do NOT remove or modify any existing styling commands with respect to the document structure(sections bold, ruled titles, etc.) that occur before \\begin{document}.
+        
         CRITICAL OUTPUT FORMAT:
         Return a VALID JSON object with:
         1. "full_latex": The full, compilable document.
