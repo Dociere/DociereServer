@@ -170,6 +170,7 @@ CRITICAL INSTRUCTIONS FOR LATEX SYNTAX:
 2. **ESCAPE CHARACTERS**: Escape the following in text: & % $ # _ {{ }} ~ ^ \\ (e.g., use `\\&` not `&`).
 3. **MATH**: Use `$` for inline math. Do not escape chars inside math mode.
 4. **CONTENT ONLY**: The JSON values should only contain the body text for that section.
+5. **NO COMMENTS**: NO LATEX COMMENTS (%) TO AVOID ANY SUBSEQUENT CODE ON THE SAME LINE GETTING COMMENTED OUT
 
 CRITICAL OUTPUT FORMAT:
 Output ONLY valid JSON. No markdown code blocks.
@@ -284,6 +285,7 @@ def edit_latex():
            - Escape & % $ # _ { } ~ ^ \\ in normal text (e.g. "Profit \\& Loss").
         3. **PRESERVE STRUCTURE**: Do not remove \\begin{document} unless asked.
         4. **PRESERVE STYLING**: Do NOT remove or modify any existing styling commands with respect to the document structure(sections bold, ruled titles, etc.) that occur before \\begin{document}.
+        5. **NO COMMENTS**: NO LATEX COMMENTS (%) TO AVOID ANY SUBSEQUENT CODE ON THE SAME LINE GETTING COMMENTED OUT
         
         CRITICAL OUTPUT FORMAT:
         Return a VALID JSON object with:
