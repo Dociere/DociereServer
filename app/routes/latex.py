@@ -122,6 +122,113 @@ def clean_json_response(text):
     text = re.sub(r'\s*```$', '', text)
     return text.strip()
 
+@latex_bp.route('/generate-boilerplate', methods=['POST'])
+def generate_boilerplate():
+    """Generate per-file content for multifile templates."""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"success": False, "error": "No JSON body provided"}), 400
+
+        title = data.get('title', '')
+        user_idea = data.get('userIdea', '')
+        template_files = data.get('templateFiles', {})
+
+        if not user_idea or not title:
+            return jsonify({"success": False, "error": "Missing title or userIdea"}), 400
+
+        if not template_files:
+            return jsonify({"success": False, "error": "No template files provided"}), 400
+
+        # Build a description of what each file should contain
+        file_descriptions = []
+        for file_key in template_files:
+            # Skip non-content files
+            if file_key.endswith('.gitkeep') or file_key.endswith('.cls') or file_key.endswith('.sty') or file_key.endswith('.pdf'):
+                continue
+            if file_key == 'main.tex' or file_key == 'authors.tex' or file_key == 'ccs.tex':
+                continue  # main.tex is the template skeleton, don't generate for it
+            
+            file_descriptions.append(file_key)
+
+        if not file_descriptions:
+            return jsonify({"success": True, "fileContents": {}})
+
+        prompt = f"""You are an expert academic LaTeX content generator.
+
+Task: Generate content for a research paper titled "{title}" based on this idea: "{user_idea}"
+
+Generate content for EACH of the following template files. Each file will be \\input{{}} into the main document(\\input{{}} already exists), so output ONLY the body content — NO \\documentclass, NO \\begin{{document}},NO \\input{{}},  NO \\section{{}} commands (the main.tex already has the section headings).
+
+CRITICAL RULES:
+1. NO MARKDOWN — use \\textbf{{}} and \\textit{{}} instead of **bold** and *italic*
+2. ESCAPE special characters in text: & % $ # _ {{ }} ~ ^ \\
+3. NO \\section{{}} or \\subsection{{}} commands unless the file is specifically a section body that needs subsections
+4. For abstract.tex: plain text only, no commands
+5. For keywords.tex: comma-separated keywords only
+6. For title.tex: just the title text
+7. For references.tex: \\bibitem entries only (no \\begin{{thebibliography}})
+8. For section files (sections/*.tex): body content only, may include \\subsection{{}} if appropriate
+9. For acknowledgment.tex: plain acknowledgment text
+10. NO LATEX COMMENTS (%) to avoid commenting out subsequent code
+
+CRITICAL OUTPUT FORMAT:
+Return ONLY valid JSON. No markdown code blocks.
+The JSON should map each filename to its generated content:
+{{
+    {', '.join([f'"{f}": "content for {f}"' for f in file_descriptions])}
+}}
+
+Generate substantive, academic-quality content for each file based on the paper topic."""
+
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=prompt,
+            config=genai.types.GenerateContentConfig(
+                response_mime_type='application/json',
+            )
+        )
+        raw_text = response.text
+
+        # Parse JSON response — should be valid since we used JSON mode
+        try:
+            file_contents = json.loads(raw_text)
+        except json.JSONDecodeError as e1:
+            logger.warning(f"JSON parse failed even with JSON mode: {e1}. Attempting cleanup...")
+            cleaned_json = clean_json_response(raw_text)
+            try:
+                file_contents = json.loads(cleaned_json)
+            except json.JSONDecodeError as e2:
+                repaired_json = repair_json(cleaned_json)
+                try:
+                    file_contents = json.loads(repaired_json)
+                except json.JSONDecodeError as e3:
+                    logger.error(f"JSON parse failed after all attempts: {e3}")
+                    return jsonify({
+                        "success": False,
+                        "error": "AI generated invalid JSON",
+                        "details": str(e3)
+                    }), 500
+
+        # Validate each file content for security
+        for fkey, content in file_contents.items():
+            if isinstance(content, str) and len(content) > 0:
+                is_safe, msg = validate_latex_security(content)
+                if not is_safe:
+                    logger.warning(f"Security check failed for {fkey}: {msg}")
+                    file_contents[fkey] = f"% Content removed for security: {msg}"
+
+        logger.info(f"Generated boilerplate for {len(file_contents)} files")
+        return jsonify({
+            "success": True,
+            "fileContents": file_contents
+        })
+
+    except Exception as e:
+        logger.error(f"Boilerplate Generation Error: {str(e)}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @latex_bp.route('/generate-latex', methods=['POST'])
 def generate_latex():
     try:
@@ -298,7 +405,13 @@ def edit_latex():
         3. **PRESERVE STRUCTURE**: Do not remove \\\\begin{document} unless asked.
         4. **PRESERVE STYLING**: Do NOT remove or modify any existing styling commands with respect to the document structure(sections bold, ruled titles, etc.) that occur before \\\\begin{document}.
         5. **NO COMMENTS**: NO LATEX COMMENTS (%) TO AVOID ANY SUBSEQUENT CODE ON THE SAME LINE GETTING COMMENTED OUT
-        6. **PRESERVE FILE MARKERS**: The document may contain markers like `%% BEGIN_INPUT{filename.tex} %%` and `%% END_INPUT{filename.tex} %%`. These indicate content from external files. You MUST preserve these markers exactly as they are. You may edit the LaTeX content BETWEEN the markers, but NEVER remove, rename, or restructure the markers themselves.
+        6. **PRESERVE FILE MARKERS (HIGHEST PRIORITY)**: The document contains markers like `%% BEGIN_INPUT{filename.tex} %%` and `%% END_INPUT{filename.tex} %%`. These wrap content from external files loaded via \\input{}.
+           - You MUST preserve ALL markers exactly as they appear.
+           - You may ONLY edit the LaTeX content BETWEEN matching BEGIN/END markers.
+           - NEVER remove markers. NEVER replace a marked section with inline content. NEVER delete BEGIN or END lines.
+           - If a user asks to add content to a section whose content is between markers, put it BETWEEN the existing markers.
+           - Example - CORRECT: `%% BEGIN_INPUT{abstract.tex} %%\nNew abstract text here\n%% END_INPUT{abstract.tex} %%`
+           - Example - WRONG: Removing the markers and putting `New abstract text here` directly in the document.
         
         CRITICAL OUTPUT FORMAT:
         Return a VALID JSON object with:
