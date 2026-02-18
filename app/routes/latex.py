@@ -267,9 +267,21 @@ def edit_latex():
         data = request.get_json()
         user_prompt = data.get('prompt')
         current_latex = data.get('latexContent')
+        context = data.get('context')  # Optional: { title, abstractText, outline }
 
         if not user_prompt or not current_latex:
             return jsonify({"success": False, "error": "Missing inputs"}), 400
+
+        # Build context section for the prompt
+        context_block = ""
+        if context:
+            if context.get('title'):
+                context_block += "\nPaper Title: " + context['title']
+            if context.get('abstractText'):
+                context_block += "\nAbstract: " + context['abstractText']
+            if context.get('outline'):
+                outline_str = " → ".join(context['outline'])
+                context_block += "\nDocument Sections: " + outline_str
 
         # System Prompt (Requesting JSON)
         system_prompt = """You are an expert LaTeX Editor.
@@ -278,22 +290,30 @@ def edit_latex():
         CRITICAL SYNTAX RULES:
         1. **NO MARKDOWN**: 
            - ❌ NEVER output `**text**` or `*text*`. 
-           - ✅ ALWAYS output `\\textbf{text}` or `\\textit{text}`.
+           - ✅ ALWAYS output `\\\\textbf{text}` or `\\\\textit{text}`.
            - ❌ NEVER output `### Heading`.
-           - ✅ ALWAYS output `\\section{Heading}`.
+           - ✅ ALWAYS output `\\\\section{Heading}`.
         2. **ESCAPE TEXT CHARACTERS**: 
-           - Escape & % $ # _ { } ~ ^ \\ in normal text (e.g. "Profit \\& Loss").
-        3. **PRESERVE STRUCTURE**: Do not remove \\begin{document} unless asked.
-        4. **PRESERVE STYLING**: Do NOT remove or modify any existing styling commands with respect to the document structure(sections bold, ruled titles, etc.) that occur before \\begin{document}.
+           - Escape & % $ # _ { } ~ ^ \\\\ in normal text (e.g. "Profit \\\\& Loss").
+        3. **PRESERVE STRUCTURE**: Do not remove \\\\begin{document} unless asked.
+        4. **PRESERVE STYLING**: Do NOT remove or modify any existing styling commands with respect to the document structure(sections bold, ruled titles, etc.) that occur before \\\\begin{document}.
         5. **NO COMMENTS**: NO LATEX COMMENTS (%) TO AVOID ANY SUBSEQUENT CODE ON THE SAME LINE GETTING COMMENTED OUT
+        6. **PRESERVE FILE MARKERS**: The document may contain markers like `%% BEGIN_INPUT{filename.tex} %%` and `%% END_INPUT{filename.tex} %%`. These indicate content from external files. You MUST preserve these markers exactly as they are. You may edit the LaTeX content BETWEEN the markers, but NEVER remove, rename, or restructure the markers themselves.
         
         CRITICAL OUTPUT FORMAT:
         Return a VALID JSON object with:
         1. "full_latex": The full, compilable document.
         2. "changed_snippet": A short excerpt of just the modified part.
         
-        Output raw JSON only. Escape backslashes in the JSON string (e.g. \\\\documentclass).
+        Output raw JSON only. Escape backslashes in the JSON string (e.g. \\\\\\\\documentclass).
         """
+
+        # Inject context block if available
+        if context_block:
+            system_prompt = system_prompt.replace(
+                "Task: Modify the LaTeX document based on the user's request.",
+                "Task: Modify the LaTeX document based on the user's request.\n\n        DOCUMENT CONTEXT:" + context_block
+            )
 
         full_prompt = f"""{system_prompt}\n\nUSER: "{user_prompt}"\n\nDOCUMENT:\n{current_latex}"""
 
