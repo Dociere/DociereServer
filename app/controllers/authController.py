@@ -21,15 +21,18 @@ def register_user(data):
         return {"success": False, "error": "Username, EmailID and password required"}, 400
 
     # Check if user exists (email as unique identifier assumed)
-    if emailId in userDB:
+    result = list(userDB.find({"selector": {"emailId": emailId}}))
+    if result:
         return {"success": False, "error": "User already exists"}, 400
 
     # Hash password
     hashed_pw = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt())
 
+    user_id = str(uuid.uuid4())
+
     user_doc = {
-        "_id": emailId,
-        "userId": str(uuid.uuid4()),
+        "_id": user_id,
+        "userId": user_id,
         "userName": userName,
         "emailId": emailId,
         "password": hashed_pw.decode("utf-8"),
@@ -75,7 +78,7 @@ def register_user(data):
 
 
 def login_user(data):
-    userName = data.get("userName")
+    # userName = data.get("userName")
     emailId = data.get("emailId")
     password = data.get("password")
 
@@ -83,7 +86,8 @@ def login_user(data):
         return {"success": False, "error": "EmailID and password required"}, 400
 
     try:
-        user = userDB[emailId]
+        result = userDB.find({"selector": {"emailId": emailId}})
+        user = list(result)[0] if result else None
     except KeyError:
         return {"success": False, "error": "Invalid username or password"}, 401
 

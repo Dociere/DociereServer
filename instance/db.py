@@ -32,7 +32,12 @@ if "drafts" not in server:
     server.create("drafts")
 draftsDB = server["drafts"]
 
-# This is for creating other DBs
-# userdb = server["users"]
-# messagedb = server["messages"]
-# projectdb = server["projects"]
+if "secrets" not in server:
+    server.create("secrets")
+secretsDB = server["secrets"]
+
+# userDB.create_index({
+#     "index": {"fields": ["emailId"]},
+#     "name": "emailId-index",
+#     "type": "json"
+# })
