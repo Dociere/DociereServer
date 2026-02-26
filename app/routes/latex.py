@@ -375,6 +375,7 @@ def edit_latex():
         user_prompt = data.get('prompt')
         current_latex = data.get('latexContent')
         context = data.get('context')  # Optional: { title, abstractText, outline }
+        file_map = data.get('fileMap')  # Optional: { "sections/intro.tex": "content...", ... }
 
         if not user_prompt or not current_latex:
             return jsonify({"success": False, "error": "Missing inputs"}), 400
@@ -390,7 +391,14 @@ def edit_latex():
                 outline_str = " → ".join(context['outline'])
                 context_block += "\nDocument Sections: " + outline_str
 
-        # System Prompt (Requesting JSON)
+        # Build the project files section for the prompt
+        project_files_block = ""
+        if file_map and isinstance(file_map, dict) and len(file_map) > 0:
+            project_files_block = "\n\nPROJECT FILES:\nThe project has multiple files. Below is each file with its path and current content.\n"
+            for file_path, content in file_map.items():
+                project_files_block += f"\n--- FILE: {file_path} ---\n{content}\n--- END FILE: {file_path} ---\n"
+
+        # System Prompt
         system_prompt = """You are an expert LaTeX Editor.
         Task: Modify the LaTeX document based on the user's request.
 
@@ -401,22 +409,38 @@ def edit_latex():
            - ❌ NEVER output `### Heading`.
            - ✅ ALWAYS output `\\\\section{Heading}`.
         2. **ESCAPE TEXT CHARACTERS**: 
-           - Escape & % $ # _ { } ~ ^ \\\\ in normal text (e.g. "Profit \\\\& Loss").
+           - Escape & % $ # _ { } ~ ^ \\\\ in normal text (e.g. "Profit \\\\&  Loss").
         3. **PRESERVE STRUCTURE**: Do not remove \\\\begin{document} unless asked.
         4. **PRESERVE STYLING**: Do NOT remove or modify any existing styling commands with respect to the document structure(sections bold, ruled titles, etc.) that occur before \\\\begin{document}.
         5. **NO COMMENTS**: NO LATEX COMMENTS (%) TO AVOID ANY SUBSEQUENT CODE ON THE SAME LINE GETTING COMMENTED OUT
+        """
+
+        # Add file-map-aware instructions
+        if file_map and len(file_map) > 0:
+            system_prompt += """
+        6. **MULTI-FILE PROJECT**: This is a multi-file LaTeX project. The main document uses \\\\input{} to include content from separate files. 
+           - The PROJECT FILES section shows ALL project files with their paths and current content.
+           - When the user asks to edit content, identify WHICH FILE contains that content and modify it there.
+           - Your response MUST include a `file_updates` object mapping each modified file path to its COMPLETE new content.
+           - Only include files that you actually changed in `file_updates`. Do NOT include unchanged files.
+           - The `full_latex` field should contain the updated main document (only if the main document itself changed, otherwise return it unchanged).
+           - File paths in `file_updates` must exactly match the paths shown in PROJECT FILES.
+        """
+        else:
+            system_prompt += """
         6. **PRESERVE FILE MARKERS (HIGHEST PRIORITY)**: The document contains markers like `%% BEGIN_INPUT{filename.tex} %%` and `%% END_INPUT{filename.tex} %%`. These wrap content from external files loaded via \\input{}.
            - You MUST preserve ALL markers exactly as they appear.
            - You may ONLY edit the LaTeX content BETWEEN matching BEGIN/END markers.
            - NEVER remove markers. NEVER replace a marked section with inline content. NEVER delete BEGIN or END lines.
-           - If a user asks to add content to a section whose content is between markers, put it BETWEEN the existing markers.
-           - Example - CORRECT: `%% BEGIN_INPUT{abstract.tex} %%\nNew abstract text here\n%% END_INPUT{abstract.tex} %%`
-           - Example - WRONG: Removing the markers and putting `New abstract text here` directly in the document.
+        """
         
+        system_prompt += """
         CRITICAL OUTPUT FORMAT:
         Return a VALID JSON object with:
-        1. "full_latex": The full, compilable document.
-        2. "changed_snippet": A short excerpt of just the modified part.
+        1. "full_latex": The full, compilable main document.
+        2. "changed_snippet": A short excerpt of just the modified part (for preview).
+        3. "message": A brief description of what was changed.
+        4. "file_updates": An object mapping file paths to their complete new content (ONLY for files that were modified). If no project files were changed (e.g. single-file project), this should be an empty object {}.
         
         Output raw JSON only. Escape backslashes in the JSON string (e.g. \\\\\\\\documentclass).
         """
@@ -428,7 +452,7 @@ def edit_latex():
                 "Task: Modify the LaTeX document based on the user's request.\n\n        DOCUMENT CONTEXT:" + context_block
             )
 
-        full_prompt = f"""{system_prompt}\n\nUSER: "{user_prompt}"\n\nDOCUMENT:\n{current_latex}"""
+        full_prompt = f"""{system_prompt}\n\nUSER: "{user_prompt}"\n\nMAIN DOCUMENT:\n{current_latex}{project_files_block}"""
 
         response = client.models.generate_content(
             model='gemini-2.5-flash', 
@@ -439,13 +463,24 @@ def edit_latex():
         cleaned_text = clean_json_response(response.text)
         try:
             result_json = json.loads(cleaned_text)
-            full_doc = result_json.get('full_latex', '')
-            snippet = result_json.get('changed_snippet', '')
         except json.JSONDecodeError:
-            logger.error("JSON Decode failed, falling back to raw text")
-            # Fallback: Assume the whole text is the latex if JSON fails
-            full_doc = cleaned_text
-            snippet = ""
+            # Try repair
+            repaired = repair_json(cleaned_text)
+            try:
+                result_json = json.loads(repaired)
+            except json.JSONDecodeError:
+                logger.error("JSON Decode failed, falling back to raw text")
+                result_json = {
+                    'full_latex': cleaned_text,
+                    'changed_snippet': '',
+                    'message': 'Changes applied.',
+                    'file_updates': {}
+                }
+
+        full_doc = result_json.get('full_latex', '')
+        snippet = result_json.get('changed_snippet', '')
+        message = result_json.get('message', 'Changes applied.')
+        file_updates = result_json.get('file_updates', {})
 
         # --- FALLBACK: Auto-calculate Diff if Snippet is empty ---
         if not snippet or len(snippet) < 10:
@@ -461,6 +496,10 @@ def edit_latex():
             if changes:
                 snippet = "\n".join(changes[:10]) # First 10 changed lines
                 if len(changes) > 10: snippet += "\n..."
+            elif file_updates:
+                # Changes were in project files, not main doc
+                changed_files = list(file_updates.keys())
+                snippet = f"Modified {len(changed_files)} file(s): {', '.join(changed_files)}"
             else:
                 snippet = "Modifications applied throughout the document."
 
@@ -471,7 +510,8 @@ def edit_latex():
             "success": True,
             "latexContent": full_doc,
             "changedSnippet": snippet,
-            "message": "Success"
+            "message": message,
+            "fileUpdates": file_updates
         })
 
     except Exception as e:
