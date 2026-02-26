@@ -76,29 +76,51 @@ RENDERER_MAP = {
 }
 
 def repair_json(json_str):
+    """Aggressively repair JSON with unescaped LaTeX backslashes."""
     # 1. Strip Markdown code blocks
     json_str = re.sub(r'^```(json)?\s*', '', json_str, flags=re.IGNORECASE)
     json_str = re.sub(r'\s*```$', '', json_str)
-    
-    # 2. FIX: Escape backslashes that are NOT valid JSON escapes.
-    # JSON allows: \", \\, \/, \b, \f, \n, \r, \t, \uXXXX
-    # LaTeX uses: \c, \s, \t, \b, \l, \S, etc. 
-    # Logic: Find a backslash that is NOT followed by specific valid chars
-    
-    # Pattern: (?<!\\)\\(?![nrtbfu"\\/])
-    # Meaning: A backslash, NOT preceded by another backslash, and NOT followed by valid escape chars.
-    
-    json_str = re.sub(r'(?<!\\)\\(?![nrtbfu"\\/])', r'\\\\', json_str)
+    json_str = json_str.strip()
 
-    # 3. Specific fix for common LaTeX double-backslashes which might be triply escaped or weird
-    # If the AI wrote literal newline as \n, we keep it. 
-    # But if it wrote LaTeX newline \\ (double backslash), in JSON string it should be \\\\
-    # This is hard to distinguish from regex alone, but the step 2 regex usually handles \section -> \\section safe.
-
-    # 4. Remove trailing commas (common AI error)
+    # 2. Remove trailing commas (common AI error)
     json_str = re.sub(r',\s*([\]}])', r'\1', json_str)
-    
-    return json_str.strip()
+
+    # 3. Character-level backslash repair inside JSON string values.
+    #    Walk through the string; when inside a quoted value, ensure every
+    #    backslash that is NOT already a valid JSON escape is doubled.
+    VALID_ESCAPES = set('"\\bfnrtu/')
+    result = []
+    i = 0
+    in_string = False
+    while i < len(json_str):
+        ch = json_str[i]
+        if ch == '"' and (i == 0 or json_str[i - 1] != '\\'):
+            in_string = not in_string
+            result.append(ch)
+            i += 1
+        elif in_string and ch == '\\':
+            # Check what follows the backslash
+            if i + 1 < len(json_str):
+                next_ch = json_str[i + 1]
+                if next_ch in VALID_ESCAPES:
+                    # Already a valid JSON escape – keep as-is
+                    result.append(ch)
+                    result.append(next_ch)
+                    i += 2
+                else:
+                    # Not a valid JSON escape (LaTeX command like \section)
+                    # Double the backslash so JSON sees \\
+                    result.append('\\\\')
+                    i += 1  # leave next_ch to be processed normally
+            else:
+                # Trailing backslash – escape it
+                result.append('\\\\')
+                i += 1
+        else:
+            result.append(ch)
+            i += 1
+
+    return ''.join(result)
 
 # --- UTILS ---
 def validate_latex_security(latex_content):
@@ -172,8 +194,18 @@ CRITICAL RULES:
 9. For acknowledgment.tex: plain acknowledgment text
 10. NO LATEX COMMENTS (%) to avoid commenting out subsequent code
 
+CRITICAL JSON RULES:
+- Every backslash in LaTeX commands MUST be escaped as a double-backslash in the JSON string value.
+  For example: \\textbf{{bold}} must appear as \\\\textbf{{bold}} in the JSON string.
+  \\subsection{{Title}} must appear as \\\\subsection{{Title}} in the JSON string.
+  \\cite{{ref}} must appear as \\\\cite{{ref}} in the JSON string.
+- Do NOT include any control characters, literal newlines, or unescaped special characters.
+- Use \\n for newlines inside JSON string values.
+- Do NOT add trailing commas after the last key-value pair.
+- Do NOT wrap the output in markdown code blocks.
+
 CRITICAL OUTPUT FORMAT:
-Return ONLY valid JSON. No markdown code blocks.
+Return ONLY valid JSON. No markdown code blocks. No extra text before or after.
 The JSON should map each filename to its generated content:
 {{
     {', '.join([f'"{f}": "content for {f}"' for f in file_descriptions])}
@@ -191,6 +223,7 @@ Generate substantive, academic-quality content for each file based on the paper 
         raw_text = response.text
 
         # Parse JSON response — should be valid since we used JSON mode
+        file_contents = None
         try:
             file_contents = json.loads(raw_text)
         except json.JSONDecodeError as e1:
@@ -203,12 +236,42 @@ Generate substantive, academic-quality content for each file based on the paper 
                 try:
                     file_contents = json.loads(repaired_json)
                 except json.JSONDecodeError as e3:
-                    logger.error(f"JSON parse failed after all attempts: {e3}")
-                    return jsonify({
-                        "success": False,
-                        "error": "AI generated invalid JSON",
-                        "details": str(e3)
-                    }), 500
+                    logger.warning(f"JSON parse failed after repair: {e3}. Retrying with stricter prompt...")
+
+        # Retry with a stricter prompt if all parsing attempts failed
+        if file_contents is None:
+            retry_prompt = f"""Generate a JSON object mapping filenames to LaTeX content for a paper titled "{title}" about: "{user_idea}"
+
+Files to generate: {json.dumps(file_descriptions)}
+
+RULES:
+- Output ONLY body content for each file (no \\documentclass, no \\begin{{document}}, no \\section{{}}).
+- All LaTeX backslashes MUST be double-escaped in JSON (e.g. \\\\textbf not \\textbf).
+- Use \\n for newlines inside strings.
+- NO trailing commas. NO markdown code blocks. NO comments.
+- Output must be STRICTLY valid JSON that can be parsed by json.loads()."""
+            try:
+                retry_response = client.models.generate_content(
+                    model='gemini-2.5-flash',
+                    contents=retry_prompt,
+                    config=genai.types.GenerateContentConfig(
+                        response_mime_type='application/json',
+                    )
+                )
+                retry_text = retry_response.text
+                try:
+                    file_contents = json.loads(retry_text)
+                except json.JSONDecodeError:
+                    repaired_retry = repair_json(retry_text)
+                    file_contents = json.loads(repaired_retry)
+                logger.info("Retry succeeded for boilerplate generation.")
+            except Exception as retry_err:
+                logger.error(f"JSON parse failed after all attempts including retry: {retry_err}")
+                return jsonify({
+                    "success": False,
+                    "error": "AI generated invalid JSON",
+                    "details": str(retry_err)
+                }), 500
 
         # Validate each file content for security
         for fkey, content in file_contents.items():
