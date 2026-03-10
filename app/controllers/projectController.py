@@ -1,9 +1,7 @@
-from flask import request, jsonify
 from datetime import datetime, timezone
 from instance.db import projectsDB
 
 def saveProject(project_id, data):
-    # data = request.get_json()
     title = data.get("title")
     files = data.get("files")
     owner = data.get("owner")
@@ -30,6 +28,4 @@ def saveProject(project_id, data):
             "owner": owner,
         })
 
-    return jsonify({
-        "success": True,
-    }), 200
+    return {"success": True}

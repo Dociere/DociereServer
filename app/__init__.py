@@ -1,32 +1,35 @@
 import os
 import logging
-from flask import Flask
-from flask_cors import CORS
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
+
 # Load environment variables
 load_dotenv()
 
 def create_app():
-    app = Flask(__name__)
+    app = FastAPI()
 
     # Configure Logging
     logging.basicConfig(level=logging.INFO)
-    logger = logging.getLogger(__name__)
 
     # Middleware / CORS Setup
-    CORS(app, resources={r"/*": {
-        "origins": [
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[
             "http://localhost:3000",
             "http://localhost:5173",
             "http://localhost:5000",
-            "*" #remove this in production environment (FIXME)
+            "*"  # remove this in production environment (FIXME)
         ],
-        "supports_credentials": True,
-        "allow_headers": ["Content-Type"],
-        "expose_headers": ["Set-Cookie"]
-    }})
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["Content-Type"],
+        expose_headers=["Set-Cookie"],
+    )
 
-    from .routes import register_blueprints
-    register_blueprints(app)
+    from .routes import get_routers
+    for router in get_routers():
+        app.include_router(router, prefix="/api")
 
     return app

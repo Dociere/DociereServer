@@ -1,4 +1,3 @@
-from flask import request, jsonify
 from datetime import datetime, timezone
 from instance.db import draftsDB
 
@@ -15,6 +14,4 @@ def createDraft(project_id, data):
             "content": content,
         })
 
-    return jsonify({
-        "success": True,
-    }), 200
+    return {"success": True}
