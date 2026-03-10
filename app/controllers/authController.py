@@ -3,7 +3,7 @@ import bcrypt
 import os
 import jwt
 from instance.db import userDB
-from flask import current_app, jsonify, make_response
+from fastapi.responses import JSONResponse
 from datetime import datetime, timezone, timedelta
 import time
 
@@ -18,12 +18,18 @@ def register_user(data):
     password = data.get("password")
 
     if not userName or not emailId or not password:
-        return {"success": False, "error": "Username, EmailID and password required"}, 400
+        return JSONResponse(
+            content={"success": False, "error": "Username, EmailID and password required"},
+            status_code=400,
+        )
 
     # Check if user exists (email as unique identifier assumed)
     result = list(userDB.find({"selector": {"emailId": emailId}}))
     if result:
-        return {"success": False, "error": "User already exists"}, 400
+        return JSONResponse(
+            content={"success": False, "error": "User already exists"},
+            status_code=400,
+        )
 
     # Hash password
     hashed_pw = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt())
@@ -54,22 +60,25 @@ def register_user(data):
     )
 
     # Create response + set cookie
-    response = make_response(jsonify({
-        "message": "User created successfully",
-        "user": {
-            "userId": user_doc["userId"],
-            "userName": userName,
-            "emailId": emailId
+    response = JSONResponse(
+        content={
+            "message": "User created successfully",
+            "user": {
+                "userId": user_doc["userId"],
+                "userName": userName,
+                "emailId": emailId
+            },
+            "token": token
         },
-        "token": token
-    }), 201)
+        status_code=201,
+    )
 
     response.set_cookie(
-        "uid",
-        token,
+        key="uid",
+        value=token,
         httponly=True,
         secure=os.getenv("NODE_ENV") == "production",
-        samesite="Lax",
+        samesite="lax",
         max_age=24 * 60 * 60  # 1 day
     )
 
@@ -78,24 +87,32 @@ def register_user(data):
 
 
 def login_user(data):
-    # userName = data.get("userName")
     emailId = data.get("emailId")
     password = data.get("password")
 
     if not password or not emailId:
-        return {"success": False, "error": "EmailID and password required"}, 400
+        return JSONResponse(
+            content={"success": False, "error": "EmailID and password required"},
+            status_code=400,
+        )
 
     try:
         result = userDB.find({"selector": {"emailId": emailId}})
         user = list(result)[0] if result else None
     except KeyError:
-        return {"success": False, "error": "Invalid username or password"}, 401
+        return JSONResponse(
+            content={"success": False, "error": "Invalid username or password"},
+            status_code=401,
+        )
 
     if not bcrypt.checkpw(
         password.encode("utf-8"),
         user["password"].encode("utf-8")
     ):
-        return {"success": False, "error": "Invalid username or password"}, 401
+        return JSONResponse(
+            content={"success": False, "error": "Invalid username or password"},
+            status_code=401,
+        )
 
     # Create JWT
     token = jwt.encode(
@@ -110,32 +127,37 @@ def login_user(data):
     )
 
     # Create response + set cookie
-    response = make_response(jsonify({
-        "success": True,
-        "message": "Login successful",
-        "user": {
-            "userId": user["userId"],
-            "userName": user["userName"],
-            "emailId": user["emailId"]
+    response = JSONResponse(
+        content={
+            "success": True,
+            "message": "Login successful",
+            "user": {
+                "userId": user["userId"],
+                "userName": user["userName"],
+                "emailId": user["emailId"]
+            },
+            "token": token
         },
-        "token": token
-    }), 200)
+        status_code=200,
+    )
 
     response.set_cookie(
-        "uid",
-        token,
+        key="uid",
+        value=token,
         httponly=True,
         secure=os.getenv("NODE_ENV") == "production",
-        samesite="Lax",
+        samesite="lax",
         max_age=24 * 60 * 60  # 1 day
     )
 
     return response
 
 def logout_user():
-    response = make_response(jsonify({"success": True, "message": "Logged out successfully"}), 200)
-
-    response.set_cookie("uid", "", httponly=True, samesite="Lax", max_age=0)
+    response = JSONResponse(
+        content={"success": True, "message": "Logged out successfully"},
+        status_code=200,
+    )
+    response.set_cookie(key="uid", value="", httponly=True, samesite="lax", max_age=0)
     return response
 
 
@@ -159,11 +181,3 @@ def check_auth_user(request):
         return {"authenticated": True, "user": user_payload}, 200
     except Exception as e:
         return {"authenticated": False, "message": str(e)}, 401
-
-
-# def check_server_health():
-#     return jsonify({
-#         "status": "healthy",
-#         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()),
-#         "uptime": time.time() - start_time
-#     })

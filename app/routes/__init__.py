@@ -1,16 +1,18 @@
-from .latex import latex_bp
-from .health import health_bp
-from .auth import auth_bp
-from .collaboration import collaboration_bp
-from .project import project_bp
-from .equation import equation_bp
-from .drafts import draft_bp
+from .latex import latex_router
+from .health import health_router
+from .auth import auth_router
+from .collaboration import collaboration_router
+from .project import project_router
+from .equation import equation_router
+from .drafts import draft_router
 
-def register_blueprints(app):
-    app.register_blueprint(equation_bp, url_prefix="/api")
-    app.register_blueprint(latex_bp, url_prefix="/api")
-    app.register_blueprint(health_bp, url_prefix="/api")
-    app.register_blueprint(auth_bp, url_prefix="/api")
-    app.register_blueprint(project_bp, url_prefix="/api")
-    app.register_blueprint(draft_bp, url_prefix="/api")
-    app.register_blueprint(collaboration_bp, url_prefix="/api")
+def get_routers():
+    return [
+        equation_router,
+        latex_router,
+        health_router,
+        auth_router,
+        project_router,
+        draft_router,
+        collaboration_router,
+    ]

@@ -1,8 +1,9 @@
-from flask import Blueprint, jsonify, request
+from fastapi import APIRouter, Request
 from app.controllers.projectController import saveProject
 
-project_bp = Blueprint("project", __name__)
+project_router = APIRouter()
 
-@project_bp.route("/projects/<project_id>", methods=["PUT"])
-def save_project(project_id ):
-    return saveProject(project_id, request.get_json())
+@project_router.put("/projects/{project_id}")
+async def save_project(project_id: str, request: Request):
+    data = await request.json()
+    return saveProject(project_id, data)

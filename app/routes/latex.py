@@ -1,4 +1,5 @@
-from flask import Blueprint, request, jsonify
+from fastapi import APIRouter, Request
+from fastapi.responses import JSONResponse
 import os
 import re
 import logging
@@ -10,7 +11,7 @@ import difflib
 
 load_dotenv()
 logger = logging.getLogger(__name__)
-latex_bp = Blueprint("latex", __name__)
+latex_router = APIRouter()
 
 # Initialize API Key
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -86,8 +87,6 @@ def repair_json(json_str):
     json_str = re.sub(r',\s*([\]}])', r'\1', json_str)
 
     # 3. Character-level backslash repair inside JSON string values.
-    #    Walk through the string; when inside a quoted value, ensure every
-    #    backslash that is NOT already a valid JSON escape is doubled.
     VALID_ESCAPES = set('"\\bfnrtu/')
     result = []
     i = 0
@@ -99,21 +98,16 @@ def repair_json(json_str):
             result.append(ch)
             i += 1
         elif in_string and ch == '\\':
-            # Check what follows the backslash
             if i + 1 < len(json_str):
                 next_ch = json_str[i + 1]
                 if next_ch in VALID_ESCAPES:
-                    # Already a valid JSON escape – keep as-is
                     result.append(ch)
                     result.append(next_ch)
                     i += 2
                 else:
-                    # Not a valid JSON escape (LaTeX command like \section)
-                    # Double the backslash so JSON sees \\
                     result.append('\\\\')
-                    i += 1  # leave next_ch to be processed normally
+                    i += 1
             else:
-                # Trailing backslash – escape it
                 result.append('\\\\')
                 i += 1
         else:
@@ -144,37 +138,36 @@ def clean_json_response(text):
     text = re.sub(r'\s*```$', '', text)
     return text.strip()
 
-@latex_bp.route('/generate-boilerplate', methods=['POST'])
-def generate_boilerplate():
+@latex_router.post('/generate-boilerplate')
+async def generate_boilerplate(request: Request):
     """Generate per-file content for multifile templates."""
     try:
-        data = request.get_json()
+        data = await request.json()
         if not data:
-            return jsonify({"success": False, "error": "No JSON body provided"}), 400
+            return JSONResponse(content={"success": False, "error": "No JSON body provided"}, status_code=400)
 
         title = data.get('title', '')
         user_idea = data.get('userIdea', '')
         template_files = data.get('templateFiles', {})
 
         if not user_idea or not title:
-            return jsonify({"success": False, "error": "Missing title or userIdea"}), 400
+            return JSONResponse(content={"success": False, "error": "Missing title or userIdea"}, status_code=400)
 
         if not template_files:
-            return jsonify({"success": False, "error": "No template files provided"}), 400
+            return JSONResponse(content={"success": False, "error": "No template files provided"}, status_code=400)
 
         # Build a description of what each file should contain
         file_descriptions = []
         for file_key in template_files:
-            # Skip non-content files
             if file_key.endswith('.gitkeep') or file_key.endswith('.cls') or file_key.endswith('.sty') or file_key.endswith('.pdf'):
                 continue
             if file_key == 'main.tex' or file_key == 'authors.tex' or file_key == 'ccs.tex':
-                continue  # main.tex is the template skeleton, don't generate for it
+                continue
             
             file_descriptions.append(file_key)
 
         if not file_descriptions:
-            return jsonify({"success": True, "fileContents": {}})
+            return {"success": True, "fileContents": {}}
 
         prompt = f"""You are an expert academic LaTeX content generator.
 
@@ -222,7 +215,7 @@ Generate substantive, academic-quality content for each file based on the paper 
         )
         raw_text = response.text
 
-        # Parse JSON response — should be valid since we used JSON mode
+        # Parse JSON response
         file_contents = None
         try:
             file_contents = json.loads(raw_text)
@@ -267,11 +260,14 @@ RULES:
                 logger.info("Retry succeeded for boilerplate generation.")
             except Exception as retry_err:
                 logger.error(f"JSON parse failed after all attempts including retry: {retry_err}")
-                return jsonify({
-                    "success": False,
-                    "error": "AI generated invalid JSON",
-                    "details": str(retry_err)
-                }), 500
+                return JSONResponse(
+                    content={
+                        "success": False,
+                        "error": "AI generated invalid JSON",
+                        "details": str(retry_err)
+                    },
+                    status_code=500,
+                )
 
         # Validate each file content for security
         for fkey, content in file_contents.items():
@@ -282,21 +278,22 @@ RULES:
                     file_contents[fkey] = f"% Content removed for security: {msg}"
 
         logger.info(f"Generated boilerplate for {len(file_contents)} files")
-        return jsonify({
+        return {
             "success": True,
             "fileContents": file_contents
-        })
+        }
 
     except Exception as e:
         logger.error(f"Boilerplate Generation Error: {str(e)}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
 
 
-@latex_bp.route('/generate-latex', methods=['POST'])
-def generate_latex():
+@latex_router.post('/generate-latex')
+async def generate_latex(request: Request):
     try:
-        data = request.get_json()
-        if not data: return jsonify({"success": False, "error": "No JSON body provided"}), 400
+        data = await request.json()
+        if not data:
+            return JSONResponse(content={"success": False, "error": "No JSON body provided"}, status_code=400)
 
         user_idea = data.get('userIdea')
         title = data.get('title')
@@ -304,7 +301,7 @@ def generate_latex():
         author_details = data.get('authorDetails', {})
 
         if not user_idea or not title:
-            return jsonify({"success": False, "error": "Missing userIdea or title"}), 400
+            return JSONResponse(content={"success": False, "error": "Missing userIdea or title"}, status_code=400)
 
         # --- MODE 1: BLANK DOCUMENT (Legacy) ---
         if template_type == "Blank Document":
@@ -322,15 +319,15 @@ Content: {user_idea}
             latex_content = clean_latex_response(response.text)
             
             is_safe, msg = validate_latex_security(latex_content)
-            if not is_safe: return jsonify({"success": False, "error": msg}), 400
+            if not is_safe:
+                return JSONResponse(content={"success": False, "error": msg}, status_code=400)
 
-            return jsonify({"success": True, "latexContent": latex_content})
+            return {"success": True, "latexContent": latex_content}
 
         # --- MODE 2: TEMPLATE SYSTEM (JSON + Assembly) ---
         else:
             required_sections = TEMPLATE_REGISTRY.get(template_type, ["Introduction", "Methodology", "Results", "Conclusion"])
             
-            # --- MODIFIED SYSTEM PROMPT START ---
             prompt = f"""You are an expert LaTeX content generator.
 Task: Generate content for a "{template_type}" paper titled "{title}".
 Idea: "{user_idea}"
@@ -371,11 +368,14 @@ Structure:
                     content_data = json.loads(repaired_json)
                 except json.JSONDecodeError as e2:
                     logger.error(f"CRITICAL JSON ERROR after repair. \nOriginal Error: {e1}\nRepair Error: {e2}")
-                    return jsonify({
-                        "success": False, 
-                        "error": "AI generated invalid JSON structure that could not be repaired.",
-                        "details": str(e2)
-                    }), 500
+                    return JSONResponse(
+                        content={
+                            "success": False, 
+                            "error": "AI generated invalid JSON structure that could not be repaired.",
+                            "details": str(e2)
+                        },
+                        status_code=500,
+                    )
 
             # Prepare data for renderer
             authors_list = [{
@@ -394,7 +394,10 @@ Structure:
             # Find and Call Renderer
             renderer_name = RENDERER_MAP.get(template_type)
             if not renderer_name or not hasattr(rs, renderer_name):
-                return jsonify({"success": False, "error": f"Renderer not found for {template_type}"}), 500
+                return JSONResponse(
+                    content={"success": False, "error": f"Renderer not found for {template_type}"},
+                    status_code=500,
+                )
             
             renderer_func = getattr(rs, renderer_name)
             
@@ -412,36 +415,38 @@ Structure:
                     final_latex = renderer_func(title, authors_list, content_data.get('abstract',''), content_data.get('keywords',''), content_data.get('sections',{}), journal_meta)
 
                 is_safe, msg = validate_latex_security(final_latex)
-                if not is_safe: return jsonify({"success": False, "error": msg}), 400
+                if not is_safe:
+                    return JSONResponse(content={"success": False, "error": msg}, status_code=400)
 
-                return jsonify({
+                return {
                     "success": True,
                     "latexContent": final_latex,
                     "projectJson": content_data 
-                })
+                }
 
             except Exception as te:
                 logger.error(f"Renderer Error: {te}")
-                return jsonify({"success": False, "error": f"Template Rendering Failed: {str(te)}"}), 500
+                return JSONResponse(
+                    content={"success": False, "error": f"Template Rendering Failed: {str(te)}"},
+                    status_code=500,
+                )
 
     except Exception as e:
         logger.error(f"Generation Error: {str(e)}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
 
 
-# latex.py
-
-@latex_bp.route('/edit-latex', methods=['POST'])
-def edit_latex():
+@latex_router.post('/edit-latex')
+async def edit_latex(request: Request):
     try:
-        data = request.get_json()
+        data = await request.json()
         user_prompt = data.get('prompt')
         current_latex = data.get('latexContent')
-        context = data.get('context')  # Optional: { title, abstractText, outline }
-        file_map = data.get('fileMap')  # Optional: { "sections/intro.tex": "content...", ... }
+        context = data.get('context')
+        file_map = data.get('fileMap')
 
         if not user_prompt or not current_latex:
-            return jsonify({"success": False, "error": "Missing inputs"}), 400
+            return JSONResponse(content={"success": False, "error": "Missing inputs"}, status_code=400)
 
         # Build context section for the prompt
         context_block = ""
@@ -547,36 +552,33 @@ def edit_latex():
 
         # --- FALLBACK: Auto-calculate Diff if Snippet is empty ---
         if not snippet or len(snippet) < 10:
-            # Compare lines to find the difference
             diff = difflib.unified_diff(
                 current_latex.splitlines(), 
                 full_doc.splitlines(), 
-                n=0, # No context lines
+                n=0,
                 lineterm=''
             )
-            # Extract just the added lines (starting with +)
             changes = [line[1:] for line in diff if line.startswith('+') and not line.startswith('+++')]
             if changes:
-                snippet = "\n".join(changes[:10]) # First 10 changed lines
+                snippet = "\n".join(changes[:10])
                 if len(changes) > 10: snippet += "\n..."
             elif file_updates:
-                # Changes were in project files, not main doc
                 changed_files = list(file_updates.keys())
                 snippet = f"Modified {len(changed_files)} file(s): {', '.join(changed_files)}"
             else:
                 snippet = "Modifications applied throughout the document."
 
         if "\\begin{document}" not in full_doc:
-             return jsonify({"success": False, "error": "AI malformed the structure."}), 500
+             return JSONResponse(content={"success": False, "error": "AI malformed the structure."}, status_code=500)
 
-        return jsonify({
+        return {
             "success": True,
             "latexContent": full_doc,
             "changedSnippet": snippet,
             "message": message,
             "fileUpdates": file_updates
-        })
+        }
 
     except Exception as e:
         logger.error(f"Edit Error: {str(e)}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)

@@ -1,9 +1,10 @@
-from flask import Blueprint, jsonify, request
+from fastapi import APIRouter, Request
 
 from app.controllers.draftController import createDraft
 
-draft_bp = Blueprint("draft", __name__)
+draft_router = APIRouter()
 
-@draft_bp.route("/drafts/<project_id>", methods=["PUT"])
-def create_draft(project_id ):
-    return createDraft(project_id, request.get_json())
+@draft_router.put("/drafts/{project_id}")
+async def create_draft(project_id: str, request: Request):
+    data = await request.json()
+    return createDraft(project_id, data)
