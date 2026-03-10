@@ -24,3 +24,6 @@ Requests for permission to use our Marks in commercial or endorsement contexts s
 **5. Reservation of Rights**
 All rights in our Marks are **expressly reserved**, including rights not yet registered. Unauthorized use outside the above guidelines may result in legal action.
 
+**6. Forks and Distributions**
+The Dociere name and logo are trademarks of Dociere.
+Forks or modified versions must remove Dociere branding unless permission is granted.
