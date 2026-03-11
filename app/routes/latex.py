@@ -8,17 +8,66 @@ from dotenv import load_dotenv
 from google import genai
 import render_strategies as rs
 import difflib
+import requests
 
 load_dotenv()
 logger = logging.getLogger(__name__)
 latex_router = APIRouter()
 
-# Initialize API Key
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-if not GEMINI_API_KEY:
-    logger.error("GEMINI_API_KEY is missing in environment variables.")
+async def call_llm(prompt, ai_config, response_mime_type=None):
+    """Dispatcher for Gemini and Ollama with JSON support"""
+    logger.info(f"🚀 call_llm invoked with provider: {ai_config.get('provider') if ai_config else 'None'}")
+    
+    # if not ai_config:
+    #     logger.warning("⚠️ No ai_config provided, falling back to default Gemini")
+    #     # Fallback to default Gemini
+    #     GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+    #     client = genai.Client(api_key=GEMINI_API_KEY)
+    #     config = None
+    #     if response_mime_type == 'application/json':
+    #         config = genai.types.GenerateContentConfig(response_mime_type='application/json')
+    #     response = client.models.generate_content(
+    #         model='gemini-2.0-flash',
+    #         contents=prompt,
+    #         config=config
+    #     )
+    #     return response.text
 
-client = genai.Client(api_key=GEMINI_API_KEY)
+    provider = ai_config.get("provider", "gemini")
+    model = ai_config.get("model", "gemini-2.5-flash")
+
+    if provider == "gemini":
+        api_key = ai_config.get("apiKey") or os.getenv("GEMINI_API_KEY")
+        logger.info(f"💎 Using Gemini provider with model: {model}")
+        client = genai.Client(api_key=api_key)
+        config = None
+        if response_mime_type == 'application/json':
+            config = genai.types.GenerateContentConfig(response_mime_type='application/json')
+        response = client.models.generate_content(
+            model=model,
+            contents=prompt,
+            config=config
+        )
+        return response.text
+    elif provider == "ollama":
+        url = ai_config.get("url", "http://localhost:11434/api/generate")
+        logger.info(f"🦙 Using Ollama provider at {url} with model: {model}")
+        payload = {
+            "model": model,
+            "prompt": prompt,
+            "stream": False
+        }
+        if response_mime_type == 'application/json':
+            payload["format"] = "json"
+            
+        logger.info(f"📤 Sending request to Ollama: {url}")
+        response = requests.post(url, json=payload)
+        response.raise_for_status()
+        logger.info("✅ Ollama response received successfully")
+        return response.json().get("response", "")
+    else:
+        logger.error(f"❌ Unknown AI provider: {provider}")
+        raise ValueError(f"Unknown AI provider: {provider}")
 
 # 1. Template Registry
 TEMPLATE_REGISTRY = {
@@ -148,6 +197,7 @@ async def generate_boilerplate(request: Request):
 
         title = data.get('title', '')
         user_idea = data.get('userIdea', '')
+        ai_config = data.get('aiConfig')
         template_files = data.get('templateFiles', {})
 
         if not user_idea or not title:
@@ -204,16 +254,9 @@ The JSON should map each filename to its generated content:
     {', '.join([f'"{f}": "content for {f}"' for f in file_descriptions])}
 }}
 
-Generate substantive, academic-quality content for each file based on the paper topic."""
+        Generate SUBSTANTIVE, ACADEMIC-QUALITY and DETAILED content for each file based on the paper topic. Ensure that each section is comprehensive and provides depth relevant to the idea "{user_idea}". Do not provide brief or placeholder text. Provide at least several paragraphs or detailed LaTeX environments for each file where appropriate."""
 
-        response = client.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=prompt,
-            config=genai.types.GenerateContentConfig(
-                response_mime_type='application/json',
-            )
-        )
-        raw_text = response.text
+        raw_text = await call_llm(prompt, ai_config, response_mime_type='application/json')
 
         # Parse JSON response
         file_contents = None
@@ -242,16 +285,10 @@ RULES:
 - All LaTeX backslashes MUST be double-escaped in JSON (e.g. \\\\textbf not \\textbf).
 - Use \\n for newlines inside strings.
 - NO trailing commas. NO markdown code blocks. NO comments.
-- Output must be STRICTLY valid JSON that can be parsed by json.loads()."""
+- Output must be STRICTLY valid JSON that can be parsed by json.loads().
+- BE DETAILED AND COMPREHENSIVE. NO SHORT RESPONSES."""
             try:
-                retry_response = client.models.generate_content(
-                    model='gemini-2.5-flash',
-                    contents=retry_prompt,
-                    config=genai.types.GenerateContentConfig(
-                        response_mime_type='application/json',
-                    )
-                )
-                retry_text = retry_response.text
+                retry_text = await call_llm(retry_prompt, ai_config, response_mime_type='application/json')
                 try:
                     file_contents = json.loads(retry_text)
                 except json.JSONDecodeError:
@@ -299,6 +336,7 @@ async def generate_latex(request: Request):
         title = data.get('title')
         template_type = data.get('templateType', 'article') 
         author_details = data.get('authorDetails', {})
+        ai_config = data.get('aiConfig')
 
         if not user_idea or not title:
             return JSONResponse(content={"success": False, "error": "Missing userIdea or title"}, status_code=400)
@@ -314,9 +352,11 @@ CRITICAL SYNTAX RULES:
 Title: {title}
 Author: {author_name}
 Content: {user_idea}
+
+Provide a HIGHLY DETAILED and COMPREHENSIVE LaTeX document. Elaborate extensively on the topic.
 """
-            response = client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
-            latex_content = clean_latex_response(response.text)
+            raw_response = await call_llm(prompt, ai_config)
+            latex_content = clean_latex_response(raw_response)
             
             is_safe, msg = validate_latex_security(latex_content)
             if not is_safe:
@@ -350,9 +390,10 @@ Structure:
         ... (generate all required sections: {', '.join(required_sections)})
     }}
 }}
+
+CRITICAL: BE DETAILED. Provide substantive and comprehensive content for EACH section. Avoid short or generic text.
 """
-            response = client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
-            raw_text = response.text
+            raw_text = await call_llm(prompt, ai_config, response_mime_type='application/json')
             
             # Attempt 1: Clean and Parse
             cleaned_json = clean_json_response(raw_text)
@@ -444,6 +485,7 @@ async def edit_latex(request: Request):
         current_latex = data.get('latexContent')
         context = data.get('context')
         file_map = data.get('fileMap')
+        ai_config = data.get('aiConfig')
 
         if not user_prompt or not current_latex:
             return JSONResponse(content={"success": False, "error": "Missing inputs"}, status_code=400)
@@ -520,15 +562,13 @@ async def edit_latex(request: Request):
                 "Task: Modify the LaTeX document based on the user's request.\n\n        DOCUMENT CONTEXT:" + context_block
             )
 
-        full_prompt = f"""{system_prompt}\n\nUSER: "{user_prompt}"\n\nMAIN DOCUMENT:\n{current_latex}{project_files_block}"""
+        full_prompt = f"""{system_prompt}\n\nUSER: "{user_prompt}"\n\nMAIN DOCUMENT:\n{current_latex}{project_files_block}
+        
+        INSTRUCTION: Be extremely DETAILED and SUBSTANTIVE in your edits. If you are adding content, make it comprehensive. Maintain academic rigor.
+        """
 
-        response = client.models.generate_content(
-            model='gemini-2.5-flash', 
-            contents=full_prompt
-        )
-
-        # Parse JSON
-        cleaned_text = clean_json_response(response.text)
+        raw_text = await call_llm(full_prompt, ai_config)
+        cleaned_text = clean_json_response(raw_text)
         try:
             result_json = json.loads(cleaned_text)
         except json.JSONDecodeError:
