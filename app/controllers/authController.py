@@ -53,7 +53,7 @@ def register_user(data):
             "userId": user_doc["userId"],
             "userName": user_doc["userName"],
             "emailId": user_doc["emailId"],
-            "exp": datetime.now(timezone.utc) + timedelta(hours=1)
+            "exp": datetime.now(timezone.utc) + timedelta(hours=24)
         },
         JWT_SECRET,
         ALGORITHM
@@ -120,7 +120,7 @@ def login_user(data):
             "userId": user["userId"],
             "userName": user["userName"],
             "emailId": user["emailId"],
-            "exp": datetime.now(timezone.utc) + timedelta(hours=1)
+            "exp": datetime.now(timezone.utc) + timedelta(hours=24)
         },
         JWT_SECRET,
         ALGORITHM

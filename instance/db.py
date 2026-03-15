@@ -36,6 +36,12 @@ if "secrets" not in server:
     server.create("secrets")
 secretsDB = server["secrets"]
 
+if "aiconfigs" not in server:
+    server.create("aiconfigs")
+aiConfigDB = server["aiconfigs"]
+
+
+
 # userDB.create_index({
 #     "index": {"fields": ["emailId"]},
 #     "name": "emailId-index",
