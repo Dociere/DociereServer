@@ -2,62 +2,84 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 import os, re, logging
 from google import genai
-
+from instance.db import secretsDB
+from app.utils.encryption import decrypt
+from app.controllers.authController import check_auth_user
 import requests
 
 logger = logging.getLogger(__name__)
 equation_router = APIRouter()
 
-async def call_llm(prompt, ai_config):
-    """Dispatcher for Gemini and Ollama"""
-    logger.info(f"🚀 call_llm (equation) invoked with provider: {ai_config.get('provider') if ai_config else 'None'}")
+async def call_llm(prompt, ai_config, response_mime_type=None, user_id=None):
+    """Dispatcher for Gemini and Ollama with JSON support"""
+    logger.info(f"🚀 call_llm invoked with provider: {ai_config.get('provider') if ai_config else 'None'}")
     
-    if not ai_config:
-        logger.warning("⚠️ No ai_config provided for equation, falling back to default Gemini")
-        # Fallback to default Gemini if no config provided
-        GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-        if not GEMINI_API_KEY:
-            raise ValueError("GEMINI_API_KEY is missing for default Gemini fallback.")
-        client = genai.Client(api_key=GEMINI_API_KEY)
-        response = client.models.generate_content(
-            model='gemini-2.0-flash',
-            contents=prompt
-        )
-        return response.text
-
     provider = ai_config.get("provider", "gemini")
     model = ai_config.get("model", "gemini-2.5-flash")
+    config_id = ai_config.get("id")
 
     if provider == "gemini":
-        api_key = ai_config.get("apiKey") or os.getenv("GEMINI_API_KEY")
-        logger.info(f"💎 Using Gemini (equation) with model: {model}")
+        api_key = ai_config.get("apiKey")
+        
+        needs_lookup = not api_key or api_key == "********"
+        if needs_lookup and user_id and config_id:
+            try:
+                if user_id in secretsDB:
+                    encrypted_key = secretsDB[user_id].get("ai_keys", {}).get(config_id)
+                    if encrypted_key:
+                        api_key = decrypt(encrypted_key)
+            except Exception as e:
+                logger.warning(f"⚠️ Could not fetch or decrypt secret for user {user_id}: {e}")
+
+        if not api_key or api_key == "********":
+            api_key = os.getenv("GEMINI_API_KEY")
+
         if not api_key:
-            raise ValueError("GEMINI_API_KEY is missing for Gemini provider.")
+            raise ValueError("GEMINI_API_KEY is missing.")
+            
+        logger.info(f"💎 Using Gemini provider with model: {model}")
+        
         client = genai.Client(api_key=api_key)
+        config = None
+        if response_mime_type == 'application/json':
+            config = genai.types.GenerateContentConfig(response_mime_type='application/json')
+            
         response = client.models.generate_content(
             model=model,
-            contents=prompt
+            contents=prompt,
+            config=config
         )
         return response.text
+        
     elif provider == "ollama":
         url = ai_config.get("url", "http://localhost:11434/api/generate")
-        logger.info(f"🦙 Using Ollama (equation) at {url} with model: {model}")
+        logger.info(f"🦙 Using Ollama provider at {url} with model: {model}")
         payload = {
             "model": model,
             "prompt": prompt,
             "stream": False
         }
+        if response_mime_type == 'application/json':
+            payload["format"] = "json"
+            
+        logger.info(f"📤 Sending request to Ollama: {url}")
         response = requests.post(url, json=payload)
         response.raise_for_status()
-        logger.info("✅ Ollama (equation) response received")
+        logger.info("✅ Ollama response received successfully")
         return response.json().get("response", "")
     else:
-        logger.error(f"❌ Unknown AI provider (equation): {provider}")
+        logger.error(f"❌ Unknown AI provider: {provider}")
         raise ValueError(f"Unknown AI provider: {provider}")
 
 @equation_router.post('/generate-equation')
 async def generate_equation(request: Request):
     try:
+        auth_result = check_auth_user(request)
+        user_id = None
+        if isinstance(auth_result, tuple):
+            response_data, status = auth_result
+            if status == 200:
+                user_id = response_data["user"]["userId"]
         data = await request.json()
         
         if not data:
@@ -67,7 +89,7 @@ async def generate_equation(request: Request):
             )
 
         user_prompt = data.get('prompt')
-        ai_config = data.get('aiConfig')
+        ai_config = data.get('aiConfig', {})
 
         # Validation
         if not user_prompt:
@@ -99,7 +121,11 @@ async def generate_equation(request: Request):
         Your Output:"""
 
         # Generate Content via Dispatcher
-        raw_response = await call_llm(prompt, ai_config)
+        raw_response = await call_llm(
+            prompt, 
+            ai_config, 
+            user_id=user_id
+        )
         latex_equation = raw_response.strip()
 
         # Robust trimming logic
