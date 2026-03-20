@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zotero Search</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #fff;
+            margin: 0;
+            padding: 12px 10px; /* added vertical padding, kept horizontal safe */
+            font-size: 12px;
+            color: #333;
+            overflow-x: hidden;
+            width: 100%;
+        }
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 12px;
+            gap: 6px;
+            width: 100%;
+        }
+        .header h3 {
+            margin: 0;
+            font-size: 12px;
+            font-weight: 700;
+            color: #111;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            padding-left: 2px;
+        }
+        .search-container {
+            margin-bottom: 12px;
+            width: 100%;
+        }
+        input {
+            width: 100%;
+            padding: 8px 10px;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            outline: none;
+            font-size: 12px;
+            background: #f8fafc;
+            transition: all 0.2s;
+        }
+        input:focus {
+            background: #fff;
+            border-color: #4f46e5;
+            box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.1);
+        }
+        .btn {
+            padding: 7px 12px;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+            border: 1px solid transparent;
+            transition: all 0.2s ease;
+            white-space: nowrap;
+        }
+        .btn-primary {
+            background: #4f46e5;
+            color: white;
+        }
+        .btn-primary:hover {
+            background: #4338ca;
+        }
+        .btn-secondary {
+            background: #fff;
+            color: #475569;
+            border-color: #e2e8f0;
+        }
+        .results {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+            width: 100%;
+        }
+        .result-item {
+            padding: 10px;
+            background: #fff;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            margin-bottom: 8px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .result-item:hover {
+            border-color: #4f46e5;
+            background: #f8fafc;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+        .title {
+            font-weight: 600;
+            color: #1e293b;
+            display: block;
+            line-height: 1.4;
+            font-size: 12px;
+        }
+        .metadata {
+            font-size: 10px;
+            color: #64748b;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .citekey {
+            font-family: inherit;
+            background: #f1f5f9;
+            padding: 1px 5px;
+            border-radius: 4px;
+            color: #475569;
+            font-size: 9px;
+            border: 1px solid #e2e8f0;
+        }
+        .settings-panel {
+            display: none;
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 16px;
+            width: 100%;
+        }
+        .settings-panel h4 {
+            margin: 0 0 10px 0;
+            font-size: 10px;
+            font-weight: 800;
+            color: #64748b;
+            text-transform: uppercase;
+        }
+        .settings-group {
+            margin-bottom: 10px;
+        }
+        .settings-group label {
+            display: block;
+            font-size: 11px;
+            font-weight: 600;
+            color: #475569;
+            margin-bottom: 4px;
+        }
+        .settings-group input {
+            width: 100%;
+            background: #fff;
+            border: 1px solid #e2e8f0;
+        }
+        .loader {
+            display: none;
+            text-align: center;
+            padding: 20px;
+            color: #64748b;
+            font-size: 11px;
+        }
+        .empty-state {
+            text-align: center;
+            padding: 30px 10px;
+            color: #94a3b8;
+            font-size: 11px;
+        }
+        .status {
+            margin-top: 10px;
+            font-size: 11px;
+            color: #94a3b8;
+            text-align: center;
+            padding: 8px;
+            border-radius: 6px;
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+        }
+        .icon-btn {
+            background: white;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            cursor: pointer;
+            padding: 5px;
+            color: #64748b;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+        .icon-btn:hover {
+            color: #4f46e5;
+            border-color: #4f46e5;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h3>Zotero Web API</h3>
+        <div style="display: flex; gap: 4px;">
+            <button class="icon-btn" id="popout-btn" title="Open in New Window">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+            </button>
+            <button class="icon-btn" id="toggle-settings" title="Zotero Settings">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+            </button>
+        </div>
+    </div>
+
+    <div id="settings-panel" class="settings-panel">
+        <h4>API Configuration</h4>
+        <div class="settings-group">
+            <label for="zotero-userid">User ID (or Group ID)</label>
+            <input type="text" id="zotero-userid" placeholder="e.g. 1234567">
+        </div>
+        <div class="settings-group">
+            <label for="zotero-apikey">API Key</label>
+            <input type="password" id="zotero-apikey" placeholder="Paste your key here">
+        </div>
+        <div style="display: flex; gap: 8px;">
+            <button class="btn btn-primary" id="save-settings" style="flex: 1;">Save</button>
+            <button class="btn btn-secondary" id="cancel-settings">Close</button>
+        </div>
+        <div style="margin-top: 8px; font-size: 10px; color: #6b7280; line-height: 1.4;">
+            Find these at <a href="https://www.zotero.org/settings/keys" target="_blank" style="color: #4f46e5;">zotero.org/settings/keys</a>
+        </div>
+    </div>
+
+    <div id="main-ui">
+        <div class="search-container">
+            <input type="text" placeholder="Search your Zotero library..." id="search" autocomplete="off">
+        </div>
+
+        <div id="loader" class="loader">Querying Zotero...</div>
+        <div id="empty-state" class="empty-state">Enter terms to search</div>
+        
+        <ul class="results" id="results"></ul>
+    </div>
+
+    <div class="status" id="status">Please configure your API settings</div>
+
+    <script src="index.js"></script>
+</body>
+</html>

@@ -1,0 +1,11 @@
+[
+  {
+    "id": "zotero-citation",
+    "name": "Zotero Citation Manager",
+    "version": "1.0.0",
+    "description": "Seamlessly search and insert Zotero citations into your Dociere editor.",
+    "author": "Dociere Team",
+    "icon": "https://www.zotero.org/favicon.ico",
+    "download_url": "http://localhost:5025/api/extensions/download/zotero-citation"
+  }
+]

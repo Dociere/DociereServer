@@ -1,7 +1,15 @@
 import uuid
-import bcrypt
 import os
 import jwt
+import hashlib
+
+try:
+    import bcrypt
+    HAS_BCRYPT = True
+except ImportError:
+    HAS_BCRYPT = False
+    print("⚠️  Warning: bcrypt not found. Using insecure hashlib fallback for development.")
+
 from instance.db import userDB
 from fastapi.responses import JSONResponse
 from datetime import datetime, timezone, timedelta
@@ -32,7 +40,11 @@ def register_user(data):
         )
 
     # Hash password
-    hashed_pw = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt())
+    if HAS_BCRYPT:
+        hashed_pw = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+    else:
+        # INSECURE FALLBACK FOR DEV ONLY
+        hashed_pw = hashlib.sha256(password.encode("utf-8")).hexdigest()
 
     user_id = str(uuid.uuid4())
 
@@ -41,7 +53,7 @@ def register_user(data):
         "userId": user_id,
         "userName": userName,
         "emailId": emailId,
-        "password": hashed_pw.decode("utf-8"),
+        "password": hashed_pw,
         "created_at": datetime.now(timezone.utc).isoformat()
     }
 
@@ -105,10 +117,19 @@ def login_user(data):
             status_code=401,
         )
 
-    if not bcrypt.checkpw(
-        password.encode("utf-8"),
-        user["password"].encode("utf-8")
-    ):
+    if HAS_BCRYPT:
+        try:
+            is_correct = bcrypt.checkpw(
+                password.encode("utf-8"),
+                user["password"].encode("utf-8")
+            )
+        except Exception:
+            # Handle cases where existing DB has non-bcrypt hashes
+            is_correct = user["password"] == hashlib.sha256(password.encode("utf-8")).hexdigest()
+    else:
+        is_correct = user["password"] == hashlib.sha256(password.encode("utf-8")).hexdigest()
+
+    if not is_correct:
         return JSONResponse(
             content={"success": False, "error": "Invalid username or password"},
             status_code=401,

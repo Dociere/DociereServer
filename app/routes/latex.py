@@ -5,7 +5,7 @@ import re
 import logging
 import json
 from dotenv import load_dotenv
-from google import genai
+# from google import genai  # Moved to dynamic import inside call_llm to prevent startup crash if not installed
 import render_strategies as rs
 import difflib
 import requests
@@ -46,6 +46,12 @@ async def call_llm(prompt, ai_config, response_mime_type=None, user_id=None):
             
         logger.info(f"💎 Using Gemini provider with model: {model}")
         
+        try:
+            from google import genai
+        except ImportError:
+            logger.error("❌ google-genai is not installed. Gemini AI features will not work.")
+            raise ImportError("The 'google-genai' package is required for Gemini AI features. Please install it using 'pip install google-genai'.")
+
         client = genai.Client(api_key=api_key)
         config = None
         if response_mime_type == 'application/json':

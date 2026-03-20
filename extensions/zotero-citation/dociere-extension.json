@@ -1,0 +1,24 @@
+{
+  "id": "zotero-citation",
+  "name": "Zotero Citation Manager",
+  "version": "1.0.0",
+  "description": "Seamlessly search and insert Zotero citations into your Dociere editor.",
+  "author": "Dociere Team",
+  "main": "index.html",
+  "contributions": {
+    "views": [
+      {
+        "id": "zotero.main",
+        "title": "Zotero Search",
+        "location": "sidebar",
+        "icon": "citation-manager.svg"
+      }
+    ],
+    "commands": [
+      {
+        "id": "zotero.search",
+        "title": "Search Zotero"
+      }
+    ]
+  }
+}

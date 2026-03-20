@@ -6,6 +6,7 @@ from .project import project_router
 from .equation import equation_router
 from .drafts import draft_router
 from .aiconfig import aiconfig_router
+from .extensions import extensions_router
 
 def get_routers():
     return [
@@ -17,4 +18,5 @@ def get_routers():
         draft_router,
         collaboration_router,
         aiconfig_router,
-    ]
+        extensions_router,
+    ]

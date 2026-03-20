@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 import os, re, logging
-from google import genai
+# from google import genai  # Moved to dynamic import inside call_llm
 from instance.db import secretsDB
 from app.utils.encryption import decrypt
 from app.controllers.authController import check_auth_user
@@ -39,6 +39,12 @@ async def call_llm(prompt, ai_config, response_mime_type=None, user_id=None):
             
         logger.info(f"💎 Using Gemini provider with model: {model}")
         
+        try:
+            from google import genai
+        except ImportError:
+            logger.error("❌ google-genai is not installed. Gemini AI features will not work.")
+            raise ImportError("The 'google-genai' package is required for Gemini AI features. Please install it using 'pip install google-genai'.")
+
         client = genai.Client(api_key=api_key)
         config = None
         if response_mime_type == 'application/json':
