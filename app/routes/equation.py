@@ -5,6 +5,7 @@ from google import genai
 from instance.db import secretsDB
 from app.utils.encryption import decrypt
 from app.controllers.authController import check_auth_user
+from app.controllers.equationController import saveEquations, getEquations
 import requests
 
 logger = logging.getLogger(__name__)
@@ -150,3 +151,12 @@ async def generate_equation(request: Request):
             content={"success": False, "error": str(e) or "Failed to generate equation"},
             status_code=500,
         )
+
+@equation_router.put("/equations/{user_id}/{project_id}")
+async def save_equations_sync(user_id: str, project_id: str, request: Request):
+    data = await request.json()
+    return saveEquations(user_id, project_id, data)
+
+@equation_router.get("/equations/{user_id}/{project_id}")
+async def get_equations_sync(user_id: str, project_id: str):
+    return getEquations(user_id, project_id)

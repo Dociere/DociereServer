@@ -40,6 +40,14 @@ if "aiconfigs" not in server:
     server.create("aiconfigs")
 aiConfigDB = server["aiconfigs"]
 
+if "equations" not in server:
+    server.create("equations")
+equationsDB = server["equations"]
+
+if "citations" not in server:
+    server.create("citations")
+citationsDB = server["citations"]
+
 
 
 # userDB.create_index({
