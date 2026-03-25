@@ -7,6 +7,7 @@ from .equation import equation_router
 from .drafts import draft_router
 from .aiconfig import aiconfig_router
 from .ai_chat import ai_chat_router
+from .citation import citation_router
 
 def get_routers():
     return [
@@ -19,4 +20,5 @@ def get_routers():
         collaboration_router,
         aiconfig_router,
         ai_chat_router,
+        citation_router,
     ]
