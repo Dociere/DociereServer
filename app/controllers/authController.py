@@ -73,13 +73,13 @@ def register_user(data):
         status_code=201,
     )
     secure = os.getenv("NODE_ENV") == "production"
-    samesite = samesite = "None" if os.getenv("NODE_ENV") == "production" else "lax"
+    samesite = None if os.getenv("NODE_ENV") == "production" else "lax"
 
     response.set_cookie(
         key="uid",
         value=token,
         httponly=True,
-        secure=secure,
+        secure=True if secure else False,
         samesite=samesite,
         max_age=24 * 60 * 60  # 1 day
     )
@@ -144,13 +144,13 @@ def login_user(data):
     )
 
     secure = os.getenv("NODE_ENV") == "production"
-    samesite = samesite = "None" if os.getenv("NODE_ENV") == "production" else "lax"
+    samesite = None if os.getenv("NODE_ENV") == "production" else "lax"
 
     response.set_cookie(
         key="uid",
         value=token,
         httponly=True,
-        secure=secure,
+        secure=True if secure else False,
         samesite=samesite,
         max_age=24 * 60 * 60  # 1 day
     )
@@ -164,9 +164,9 @@ def logout_user():
     )
 
     secure = os.getenv("NODE_ENV") == "production"
-    samesite = samesite = "None" if os.getenv("NODE_ENV") == "production" else "lax"
+    samesite = None if os.getenv("NODE_ENV") == "production" else "lax"
 
-    response.set_cookie(key="uid", value="", httponly=True, secure=secure, samesite=samesite, max_age=0)
+    response.set_cookie(key="uid", value="", httponly=True, secure=True if secure else False, samesite=samesite, max_age=0)
     return response
 
 
