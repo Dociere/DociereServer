@@ -12,6 +12,7 @@ import requests
 from instance.db import secretsDB
 from app.utils.encryption import decrypt
 from app.controllers.authController import check_auth_user
+from app.controllers.aiReviewController import generate_review_prompt, parse_review_response
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -880,4 +881,45 @@ async def edit_latex(request: Request):
 
     except Exception as e:
         logger.error(f"Edit Error: {str(e)}")
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+@latex_router.post('/review')
+async def review_latex(request: Request):
+    try:
+        auth_result = check_auth_user(request)
+        user_id = None
+        if isinstance(auth_result, tuple):
+            response_data, status = auth_result
+            if status == 200:
+                user_id = response_data["user"]["userId"]
+        
+        data = await request.json()
+        current_latex = data.get('latexContent')
+        ai_config = data.get('aiConfig', {})
+        review_options = data.get('reviewOptions', {})   # <-- NEW: categories + strictness
+
+        if not current_latex:
+            return JSONResponse(content={"success": False, "error": "Missing latexContent"}, status_code=400)
+
+        logger.info(f"📝 AI Review triggered | options={review_options}")
+        prompt = generate_review_prompt(current_latex, review_options=review_options)
+        
+        raw_text = await call_llm(
+            prompt, 
+            ai_config, 
+            response_mime_type='application/json',
+            user_id=user_id
+        )
+
+        result = parse_review_response(raw_text)
+        
+        if result["success"]:
+            logger.info(f"✅ Review returned {len(result.get('suggestions', []))} suggestion(s)")
+            return result
+        else:
+            logger.warning(f"⚠️ Review parse failed: {result.get('error')}")
+            return JSONResponse(content=result, status_code=500)
+
+    except Exception as e:
+        logger.error(f"Review Error: {str(e)}")
         return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)

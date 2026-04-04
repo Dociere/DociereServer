@@ -72,14 +72,18 @@ def register_user(data):
         },
         status_code=201,
     )
-    secure = os.getenv("NODE_ENV") == "production"
-    samesite = "none" if os.getenv("NODE_ENV") == "production" else "lax"
+    secure_cookie_env = os.getenv("SECURE_COOKIE")
+    if secure_cookie_env is not None:
+        secure = secure_cookie_env.lower() in ["true", "1", "yes"]
+    else:
+        secure = os.getenv("NODE_ENV", "").upper() == "PRODUCTION"
+    samesite = "none" if secure else "lax"
 
     response.set_cookie(
         key="uid",
         value=token,
         httponly=True,
-        secure=True if secure else False,
+        secure=secure,
         samesite=samesite,
         max_age=24 * 60 * 60  # 1 day
     )
@@ -143,14 +147,18 @@ def login_user(data):
         status_code=200,
     )
 
-    secure = os.getenv("NODE_ENV") == "production"
-    samesite = "none" if os.getenv("NODE_ENV") == "production" else "lax"
+    secure_cookie_env = os.getenv("SECURE_COOKIE")
+    if secure_cookie_env is not None:
+        secure = secure_cookie_env.lower() in ["true", "1", "yes"]
+    else:
+        secure = os.getenv("NODE_ENV", "").upper() == "PRODUCTION"
+    samesite = "none" if secure else "lax"
 
     response.set_cookie(
         key="uid",
         value=token,
         httponly=True,
-        secure=True if secure else False,
+        secure=secure,
         samesite=samesite,
         max_age=24 * 60 * 60  # 1 day
     )
@@ -163,10 +171,14 @@ def logout_user():
         status_code=200,
     )
 
-    secure = os.getenv("NODE_ENV") == "production"
-    samesite = "none" if os.getenv("NODE_ENV") == "production" else "lax"
+    secure_cookie_env = os.getenv("SECURE_COOKIE")
+    if secure_cookie_env is not None:
+        secure = secure_cookie_env.lower() in ["true", "1", "yes"]
+    else:
+        secure = os.getenv("NODE_ENV", "").upper() == "PRODUCTION"
+    samesite = "none" if secure else "lax"
 
-    response.set_cookie(key="uid", value="", httponly=True, secure=True if secure else False, samesite=samesite, max_age=0)
+    response.set_cookie(key="uid", value="", httponly=True, secure=secure, samesite=samesite, max_age=0)
     return response
 
 
