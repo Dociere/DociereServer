@@ -19,7 +19,7 @@ def create_app():
         allow_origins=[
             "http://localhost:3000",
             "http://localhost:5173",
-            "http://localhost:5000",
+            "http://localhost:50450",
             "https://www.dociere.com"
             "https://dociere.com"
             "https://server.dociere.com"
